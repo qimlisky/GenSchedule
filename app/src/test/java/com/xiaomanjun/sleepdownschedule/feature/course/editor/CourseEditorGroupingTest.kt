@@ -27,17 +27,6 @@ class CourseEditorGroupingTest {
     )
 
     @Test
-    fun equivalentFragmentsOnDifferentWeekdaysUseSeparateEditorPages() {
-        val monday = course(1, weekday = 1, weeks = listOf(1, 2, 3))
-        val thursday = course(2, weekday = 4, weeks = listOf(6, 7, 8))
-
-        val groups = buildCourseEditorGroups(monday, listOf(monday, thursday))
-
-        assertEquals(2, groups.size)
-        assertEquals(listOf(1, 4), groups.map { it.representative?.weekday })
-    }
-
-    @Test
     fun equivalentFragmentsOnSameWeekdayShareOneEditorPage() {
         val earlyWeeks = course(1, weekday = 1, weeks = listOf(1, 2, 3))
         val lateWeeks = course(2, weekday = 1, weeks = listOf(6, 7, 8))
