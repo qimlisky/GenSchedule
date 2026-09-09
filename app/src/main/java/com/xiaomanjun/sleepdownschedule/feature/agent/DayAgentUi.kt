@@ -11,7 +11,7 @@ import com.xiaomanjun.sleepdownschedule.feature.home.*
 
 import com.xiaomanjun.sleepdownschedule.app.config.SleepDownRemoteConfig
 import com.xiaomanjun.sleepdownschedule.core.remoteconfig.*
-import com.xiaomanjun.sleepdownschedule.feature.course.editor.CourseEditorMorphCornerShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import com.xiaomanjun.sleepdownschedule.feature.importing.*
 
 import com.xiaomanjun.sleepdownschedule.*
@@ -1428,10 +1428,8 @@ private fun DayAgentConversationDialog(
                          val cornerProgress = agentSmoothStep(0.04f, 0.90f, sizeProgress)
                         val visualRadiusPx =
                             sourceRadiusPx + (targetRadiusPx - sourceRadiusPx) * cornerProgress
-                        shape = CourseEditorMorphCornerShape(
-                            radiusX = visualRadiusPx,
-                            radiusY = visualRadiusPx
-                        )
+                        // Restore the native round-rect clip used by this route in v1.2.3.
+                        shape = RoundedCornerShape(visualRadiusPx.toDp())
                          clip = true
                      }
                     .clickable(
@@ -1447,7 +1445,7 @@ private fun DayAgentConversationDialog(
                     backdrop = backdrop,
                     config = state.config,
                     modifier = Modifier.matchParentSize(),
-                    shape = RoundedRectangle(32.dp),
+                    shape = RoundedCornerShape(32.dp),
                     // Keep the expanded conversation shell visually identical to the compact
                     // home card. Passing the resolved tokens also preserves the card's light/dark
                     // wallpaper treatment instead of maintaining a second drifting parameter set.

@@ -226,7 +226,7 @@ internal class OpenAiResponsesAgentRunner {
         put("instructions", instructions)
         put("input", JsonArray(input))
         put("reasoning", buildJsonObject {
-            put("effort", reasoningEffort.apiValue)
+            put("effort", if (isOfficialMimoEndpoint(settings.profile.baseUrl)) mimoResponsesEffort(reasoningEffort) else reasoningEffort.apiValue)
             if (
                 settings.profile.id == AiProviderPresets.openAI.id &&
                 isOfficialOpenAIBaseUrl(settings.profile.baseUrl)
@@ -277,7 +277,8 @@ internal class OpenAiResponsesAgentRunner {
             return content
         }
 
-        val result = StringBuilder()
+        val result = AgentResponsesTextAccumulator()
+        try {
         BufferedReader(InputStreamReader(connection.inputStream, Charsets.UTF_8)).useLines { lines ->
             lines.forEach { line ->
                 if (!line.startsWith("data:")) return@forEach
@@ -288,26 +289,13 @@ internal class OpenAiResponsesAgentRunner {
                 }.getOrNull() ?: return@forEach
                 val usage = agentTokenUsage(event)
                 if (!usage.isEmpty) onUsage(usage)
-                when (event["type"]?.jsonPrimitive?.contentOrNull) {
-                    "response.output_text.delta" -> {
-                        val delta = event["delta"]?.jsonPrimitive?.contentOrNull.orEmpty()
-                        if (delta.isNotEmpty()) {
-                            result.append(delta)
-                            onDelta(delta)
-                        }
-                    }
-                    "response.failed", "error" -> {
-                        val message = event["error"]?.jsonObject
-                            ?.get("message")?.jsonPrimitive?.contentOrNull
-                            ?: "AI 流式响应失败"
-                        throw IllegalStateException(message)
-                    }
-                }
+                result.consume(event).takeIf(String::isNotEmpty)?.let(onDelta)
             }
         }
-        connection.disconnect()
-        return result.toString().takeIf(String::isNotBlank)
-            ?: throw MissingResponsesBodyException()
+        return result.finish()
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun open(settings: AiImportSettings, body: JsonObject): HttpURLConnection {
@@ -365,7 +353,10 @@ private fun toResponsesInputMessage(message: JsonObject): JsonObject {
 
 internal fun parseAgentResponsesTurn(response: String): AgentResponsesTurn {
     val root = AgentResponsesJson.parseToJsonElement(response).jsonObject
-    val outputItems = root["output"]?.jsonArray.orEmpty()
+    check(root["status"]?.jsonPrimitive?.contentOrNull != "incomplete") {
+        "AI 回复未完成，未生成可执行计划，请重试。"
+    }
+    val outputItems = root.optionalArray("output")
         .mapNotNull { it as? JsonObject }
     val functionItems = outputItems.filter {
         it["type"]?.jsonPrimitive?.contentOrNull == "function_call"
@@ -401,7 +392,7 @@ internal fun parseAgentResponsesTurn(response: String): AgentResponsesTurn {
             ?.let(::add)
         outputItems.forEach { item ->
             if (item["type"]?.jsonPrimitive?.contentOrNull != "message") return@forEach
-            item["content"]?.jsonArray.orEmpty().forEach { part ->
+            item.optionalArray("content").forEach { part ->
                 val partObject = part as? JsonObject ?: return@forEach
                 if (partObject["type"]?.jsonPrimitive?.contentOrNull == "output_text") {
                     partObject["text"]?.jsonPrimitive?.contentOrNull
@@ -418,6 +409,34 @@ internal fun parseAgentResponsesTurn(response: String): AgentResponsesTurn {
         unparsedToolCallCount = functionItems.size - calls.size,
         usage = agentTokenUsage(root)
     )
+}
+
+/** Some compatible endpoints deliver final text only in the completed event. */
+internal class AgentResponsesTextAccumulator {
+    private val text = StringBuilder()
+
+    fun consume(event: JsonObject): String = when (event["type"]?.jsonPrimitive?.contentOrNull) {
+        "response.output_text.delta" -> event["delta"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            .also(text::append)
+        "response.completed" -> {
+            val response = event["response"] as? JsonObject
+                ?: error("AI 完成事件缺少响应正文")
+            val complete = parseAgentResponsesTurn(response.toString()).content
+            if (complete.isBlank()) "" else {
+                check(complete.startsWith(text.toString())) { "AI 最终正文与流式内容不一致，请重试。" }
+                complete.substring(text.length).also(text::append)
+            }
+        }
+        "response.incomplete" -> error("AI 回复未完成，未生成可执行计划，请重试。")
+        "response.failed", "error" -> {
+            val response = event["response"] as? JsonObject
+            val error = (event["error"] as? JsonObject) ?: (response?.get("error") as? JsonObject)
+            error(error?.get("message")?.jsonPrimitive?.contentOrNull ?: "AI 流式响应失败")
+        }
+        else -> ""
+    }
+
+    fun finish(): String = text.toString().takeIf(String::isNotBlank) ?: throw MissingResponsesBodyException()
 }
 
 private class MissingResponsesBodyException : IllegalStateException("AI 没有返回最终正文")

@@ -468,7 +468,8 @@ fun Modifier.sleepDownGlassGroupSurface(
     effectFrame: GlassEffectFrame,
     sceneState: GlassSceneState,
     sceneKey: String,
-    sampleScale: Float = 1f
+    sampleScale: Float = 1f,
+    renderEnabled: () -> Boolean = { true }
 ): Modifier {
     val eligibility = sceneState.glassGroupEligibility(sceneKey, plan, effectFrame)
     check(eligibility == GlassGroupRenderEligibility.Eligible) {
@@ -496,6 +497,8 @@ fun Modifier.sleepDownGlassGroupSurface(
         shape = { GlassGroupHostShape },
         effectFrame = backdropOnlyFrame,
         sceneState = sceneState,
+        renderEnabled = renderEnabled,
+        effectInputKey = listOf(plan.members, effectFrame, activeSampleScale),
         effectsOverride = {
             if (backdropOnlyFrame.useVibrancy) vibrancy()
             backdropOnlyFrame.blur?.let { blur(it.toPx()) }
@@ -527,4 +530,12 @@ fun Modifier.sleepDownGlassGroupSurface(
             null
         }
     )
+}
+
+/** Visibility selects complete plans; member order, host size and shader arity stay unchanged. */
+internal fun visibleGlassGroupPlans(
+    plans: List<GlassGroupPlan>,
+    mountedIds: Set<String>?
+): List<GlassGroupPlan> = if (mountedIds == null) plans else {
+    plans.filter { plan -> plan.members.any { it.id in mountedIds } }
 }

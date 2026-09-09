@@ -1,6 +1,7 @@
 package com.xiaomanjun.sleepdownschedule.feature.update
 
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -17,5 +18,42 @@ class GiteeAppUpdaterTest {
     fun stableReleaseSupersedesSameVersionBeta() {
         assertTrue(GiteeAppUpdater.isVersionNewer("1.0", "1.0 beta"))
         assertFalse(GiteeAppUpdater.isVersionNewer("1.0 beta", "1.0"))
+    }
+
+    @Test
+    fun numberedBetaDoesNotBecomeAnExtraVersionComponent() {
+        assertTrue(GiteeAppUpdater.isVersionNewer("v1.4.3", "1.4.3_beta2"))
+        assertFalse(GiteeAppUpdater.isVersionNewer("1.4.3_beta99", "1.4.3"))
+        assertTrue(GiteeAppUpdater.isVersionNewer("1.4.3_beta10", "1.4.3_beta2"))
+        assertFalse(GiteeAppUpdater.isVersionNewer("1.4.3_beta2", "1.4.3_beta10"))
+        assertTrue(GiteeAppUpdater.isVersionNewer("1.4.4_beta1", "1.4.3"))
+        assertFalse(GiteeAppUpdater.isVersionNewer("1.4.2", "1.4.3_beta2"))
+    }
+
+    @Test
+    fun releaseStagesAndBuildMetadataAreOrderedIndependently() {
+        assertTrue(GiteeAppUpdater.isVersionNewer("1.4.3-rc1", "1.4.3-beta10"))
+        assertFalse(GiteeAppUpdater.isVersionNewer("1.4.3+99", "1.4.3+1"))
+        assertFalse(GiteeAppUpdater.isVersionNewer("1.4.3_beta2", "v1.4.3-beta2"))
+    }
+
+    private fun release(tag: String, prerelease: Boolean = false) =
+        GiteeReleaseInfo(tag, tag, "", "app.apk", "https://example.test/app.apk", "", prerelease)
+
+    @Test
+    fun channelsFilterBothReleaseFlagAndBetaNameAndIgnoreListOrder() {
+        val stable = release("1.4.3")
+        val nextBeta = release("1.4.4_beta1")
+        val flagged = release("1.5.0", prerelease = true)
+        val releases = listOf(nextBeta, release("1.4.2"), flagged, stable)
+        assertEquals(stable, GiteeAppUpdater.selectRelease(releases, false))
+        assertEquals(flagged, GiteeAppUpdater.selectRelease(releases, true))
+        assertEquals(nextBeta, GiteeAppUpdater.selectRelease(listOf(nextBeta, stable), true))
+    }
+
+    @Test
+    fun stableStillWinsAtSameVersionWhenBetaChannelIsEnabled() {
+        val stable = release("1.4.3")
+        assertEquals(stable, GiteeAppUpdater.selectRelease(listOf(stable, release("1.4.3_beta20", true)), true))
     }
 }

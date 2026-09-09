@@ -6,6 +6,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -85,6 +86,47 @@ class LiveUpdatePayloadTest {
     }
 
     @Test
+    fun progressResetsAtClassAndBreakBoundaries() {
+        val payload = coursePayload()
+
+        assertNull(payload.statusAt(firstStart - 1).progressPercent)
+        assertEquals(0, payload.statusAt(firstStart).progressPercent)
+        assertEquals(50, payload.statusAt(firstStart + (firstEnd - firstStart) / 2).progressPercent)
+        assertEquals(99, payload.statusAt(firstEnd - 1).progressPercent)
+        assertEquals(0, payload.statusAt(firstEnd).progressPercent)
+        assertEquals(50, payload.statusAt(epoch(8, 50)).progressPercent)
+        assertEquals(99, payload.statusAt(secondStart - 1).progressPercent)
+        assertEquals(0, payload.statusAt(secondStart).progressPercent)
+        assertEquals(50, payload.statusAt(secondStart + (secondEnd - secondStart) / 2).progressPercent)
+        assertNull(payload.statusAt(secondEnd).progressPercent)
+    }
+
+    @Test
+    fun progressCoversWholeCourseWhenBreakStatusIsDisabled() {
+        val payload = coursePayload(breakStatusEnabled = false)
+
+        assertEquals(0, payload.statusAt(firstStart).progressPercent)
+        assertEquals(45, payload.statusAt(firstEnd).progressPercent)
+        assertEquals(50, payload.statusAt(epoch(8, 50)).progressPercent)
+        assertEquals(55, payload.statusAt(secondStart).progressPercent)
+        assertEquals(99, payload.statusAt(secondEnd - 1).progressPercent)
+    }
+
+    @Test
+    fun progressUsesValidSortedSegmentsAndHandlesAdjacentClasses() {
+        val payload = coursePayload().copy(segments = listOf(
+            LiveUpdateSegment(firstEnd, secondEnd),
+            LiveUpdateSegment(secondStart, secondStart),
+            LiveUpdateSegment(firstStart, firstEnd)
+        ))
+
+        val status = payload.statusAt(firstEnd)
+        assertEquals(LiveUpdatePhase.IN_CLASS, status.phase)
+        assertEquals(0, status.progressPercent)
+        assertNull(payload.copy(segments = emptyList()).statusAt(firstStart).progressPercent)
+    }
+
+    @Test
     fun tomorrowReminderRemainsVisibleOnlyUntilItsExpiry() {
         val expiry = epoch(23, 59)
         val payload = LiveUpdatePayload(
@@ -101,6 +143,7 @@ class LiveUpdatePayloadTest {
         )
 
         assertEquals(LiveUpdatePhase.TOMORROW, payload.statusAt(epoch(22, 0)).phase)
+        assertNull(payload.statusAt(epoch(22, 0)).progressPercent)
         assertFalse(payload.shouldStop(expiry - 1))
         assertTrue(payload.shouldStop(expiry))
     }

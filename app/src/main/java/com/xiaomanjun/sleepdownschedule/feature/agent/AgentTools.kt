@@ -511,7 +511,7 @@ private fun agentWeekResult(facts: DayAgentFacts): String = buildString {
 
 private fun agentSemesterResult(facts: DayAgentFacts): String = buildString {
     appendLine("学期状态=${facts.termState.name}（${facts.termStatus}）")
-    appendLine("课程行=id|名称|星期|节次|周次；可选字段 p=单双周（默认 ALL）、l=地点、t=教师、x=自定义时间")
+    appendLine("课程行=id|名称|星期|节次|周次；可选字段 p=单双周（默认 ALL）、l=地点、t=教师、n=备注（省略表示无备注）、x=自定义时间")
     append(
         facts.semesterCourses.distinctBy { it.id }
             .joinToString("\n", transform = ::agentCompactCourseLine)
@@ -559,7 +559,7 @@ private fun agentPeriodResult(facts: DayAgentFacts): String =
 private fun agentCourseLine(course: CourseEntity): String =
     "ID=${course.id} ${course.name}；星期=${course.weekday}；节次=${course.periods.joinToString(",")}" +
         "；周次=${course.weeks.joinToString(",")}；单双周=${course.weekParity}" +
-        "；地点=${course.location ?: "待确认"}；教师=${course.teacher ?: "待确认"}" +
+        "；地点=${course.location ?: "待确认"}；教师=${course.teacher ?: "待确认"}；备注=${course.note.orEmpty().toAgentCompactField()}" +
         course.customTimeRangeOrNull()?.let { (start, end) ->
             "；自定义时间=${start}-${end}（优先于节次默认时间）"
         }.orEmpty()
@@ -573,6 +573,7 @@ private fun agentCompactCourseLine(course: CourseEntity): String = buildList {
     if (course.weekParity != WeekParity.ALL) add("p=${course.weekParity}")
     course.location?.takeIf(String::isNotBlank)?.let { add("l=${it.toAgentCompactField()}") }
     course.teacher?.takeIf(String::isNotBlank)?.let { add("t=${it.toAgentCompactField()}") }
+    course.note?.takeIf(String::isNotBlank)?.let { add("n=${it.toAgentCompactField()}") }
     course.customTimeRangeOrNull()?.let { (start, end) -> add("x=$start-$end") }
 }.joinToString("|")
 

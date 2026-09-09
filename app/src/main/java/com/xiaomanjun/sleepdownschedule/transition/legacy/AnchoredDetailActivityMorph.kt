@@ -153,7 +153,8 @@ private class AnchoredDetailClipShape(
     private val screenWidth: Float,
     private val screenCornerRadiusPx: Float,
     private val sourceCornerRadiusPx: Float,
-    private val values: State<AnchoredDetailMorphValues>
+    private val values: State<AnchoredDetailMorphValues>,
+    private val nativeRoundClip: Boolean = false
 ) : Shape {
     override fun createOutline(
         size: androidx.compose.ui.geometry.Size,
@@ -165,7 +166,9 @@ private class AnchoredDetailClipShape(
             (screenCornerRadiusPx - sourceCornerRadiusPx) * current.progress
         val compensatedRadius =
             (radiusPx / current.scale.coerceAtLeast(0.001f) / density.density).dp
-        return RoundedRectangle(compensatedRadius).createOutline(
+        val outlineShape = if (nativeRoundClip) androidx.compose.foundation.shape.RoundedCornerShape(compensatedRadius)
+            else RoundedRectangle(compensatedRadius)
+        return outlineShape.createOutline(
             size = androidx.compose.ui.geometry.Size(
                 screenWidth,
                 current.clipBottom.coerceAtLeast(1f)
@@ -214,6 +217,7 @@ internal fun AnchoredDetailActivityMorph(
     onOpened: () -> Unit = {},
     onCloseRequested: (() -> Boolean)? = null,
     handleSystemBack: Boolean = true,
+    nativeRoundClip: Boolean = false,
     content: @Composable (requestClose: () -> Unit) -> Unit
 ) {
     var rootSize by remember { mutableStateOf(IntSize.Zero) }
@@ -240,7 +244,7 @@ internal fun AnchoredDetailActivityMorph(
         providerId = "anchored-detail-snapshot"
     )
     val bypassLegacyOpening = openingMode == AnchoredDetailOpeningMode.ShowDestination
-    val renderedProgress = if (bypassLegacyOpening) 1f else progress.value
+    val renderedProgress = { if (bypassLegacyOpening) 1f else progress.value }
 
     fun close() {
         if (closing) return
@@ -351,6 +355,7 @@ internal fun AnchoredDetailActivityMorph(
                 MorphSnapshotBackground(
                     bitmap = bitmap,
                     backgroundScaleProvider = { backgroundScale.value },
+                    nativeRoundClip = nativeRoundClip,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -370,7 +375,7 @@ internal fun AnchoredDetailActivityMorph(
                 backdrop = snapshotBackdrop.takeIf {
                     backgroundSnapshot != null && (!bypassLegacyOpening || closing)
                 },
-                progress = renderedProgress,
+                progress = renderedProgress(),
                 closing = closing,
                 destinationFirstOpening = usesDestinationFirstOpening,
                 onClose = ::close,
@@ -386,7 +391,8 @@ internal fun AnchoredDetailActivityMorph(
                 } else {
                     sourceSnapshot
                 }.takeIf { !bypassLegacyOpening || closing },
-                progress = renderedProgress,
+                progressProvider = renderedProgress,
+                nativeRoundClip = nativeRoundClip,
                 closing = closing,
                 parabolic = motionStyle == AnchoredDetailMotionStyle.Parabolic || usesCourseEditorMotion,
                 openingDownward = false,
@@ -401,7 +407,7 @@ internal fun AnchoredDetailActivityMorph(
                 rootSize = rootSize,
                 sourceCornerRadius = sourceCornerRadius,
                 sourceSnapshot = sourceSnapshot.takeIf { !bypassLegacyOpening || closing },
-                progress = renderedProgress,
+                progress = renderedProgress(),
                 closing = closing,
                 onClose = ::close,
                 sourceContent = sourceContent,
@@ -1021,7 +1027,8 @@ private fun BoxScope.AnchoredSettingsStyleMorph(
     sourceBounds: Rect?,
     sourceCornerRadius: Dp,
     sourceSnapshot: Bitmap?,
-    progress: Float,
+    progressProvider: () -> Float,
+    nativeRoundClip: Boolean,
     closing: Boolean,
     parabolic: Boolean,
     openingDownward: Boolean,
@@ -1036,8 +1043,6 @@ private fun BoxScope.AnchoredSettingsStyleMorph(
         val screenHeight = with(density) { maxHeight.toPx() }
         val source = sourceBounds ?: Rect(0f, 0f, screenWidth, screenHeight)
         val initialScale = (source.width / screenWidth).coerceAtLeast(0.001f)
-        val p = progress.coerceIn(0f, 1f)
-        val scale = initialScale + (1f - initialScale) * p
         val sourceCenterX = source.left + source.width / 2f
         val targetCornerRadiusPx = deviceScreenCornerRadiusPx()
         val arcHeight = if (parabolic) {
@@ -1046,51 +1051,60 @@ private fun BoxScope.AnchoredSettingsStyleMorph(
             0f
         }
         val initialClipBottom = source.height / initialScale
-        val clipBottom = initialClipBottom + (screenHeight - initialClipBottom) * p
-        val shellHeight = clipBottom * scale
-        val homePathCenter = if (homeCourseParabola) {
-            val sourceCenter = source.center
-            val targetCenter = androidx.compose.ui.geometry.Offset(screenWidth / 2f, screenHeight / 2f)
-            val deltaY = targetCenter.y - sourceCenter.y
-            val arcAmplitude = min(
-                with(density) { 96.dp.toPx() },
-                abs(deltaY) * 0.22f
-            )
-            val control = androidx.compose.ui.geometry.Offset(
-                x = (sourceCenter.x + targetCenter.x) / 2f,
-                y = (sourceCenter.y + targetCenter.y) / 2f + sign(deltaY) * arcAmplitude
-            )
-            val inverse = 1f - p
-            androidx.compose.ui.geometry.Offset(
-                x = inverse * inverse * sourceCenter.x +
-                    2f * inverse * p * control.x + p * p * targetCenter.x,
-                y = inverse * inverse * sourceCenter.y +
-                    2f * inverse * p * control.y + p * p * targetCenter.y
-            )
-        } else {
-            null
+        val currentProgress = rememberUpdatedState(progressProvider)
+        val valuesState = remember(source, screenWidth, screenHeight, arcHeight, closing, homeCourseParabola, openingDownward) {
+            androidx.compose.runtime.derivedStateOf {
+                val p = currentProgress.value.invoke().coerceIn(0f, 1f)
+                val scale = initialScale + (1f - initialScale) * p
+                val clipBottom = initialClipBottom + (screenHeight - initialClipBottom) * p
+                val shellHeight = clipBottom * scale
+                val homePathCenter = if (homeCourseParabola) {
+                    val sourceCenter = source.center
+                    val targetCenter = androidx.compose.ui.geometry.Offset(screenWidth / 2f, screenHeight / 2f)
+                    val deltaY = targetCenter.y - sourceCenter.y
+                    val arcAmplitude = min(
+                        with(density) { 96.dp.toPx() },
+                        abs(deltaY) * 0.22f
+                    )
+                    val control = androidx.compose.ui.geometry.Offset(
+                        x = (sourceCenter.x + targetCenter.x) / 2f,
+                        y = (sourceCenter.y + targetCenter.y) / 2f + sign(deltaY) * arcAmplitude
+                    )
+                    val inverse = 1f - p
+                    androidx.compose.ui.geometry.Offset(
+                        x = inverse * inverse * sourceCenter.x +
+                            2f * inverse * p * control.x + p * p * targetCenter.x,
+                        y = inverse * inverse * sourceCenter.y +
+                            2f * inverse * p * control.y + p * p * targetCenter.y
+                    )
+                } else {
+                    null
+                }
+                val values = AnchoredDetailMorphValues(
+                    backgroundAlpha = (p * 0.22f).coerceIn(0f, 0.22f),
+                    sourceAlpha = (1f - p * 3f).coerceIn(0f, 1f),
+                    contentAlpha = ((p - 0.1f) / 0.5f).coerceIn(0f, 1f),
+                    translationX = homePathCenter?.let { it.x - screenWidth / 2f }
+                        ?: ((sourceCenterX - screenWidth / 2f) * (1f - p)),
+                    // A quadratic arc keeps both endpoints exact while lifting the page through the
+                    // middle of the transition. This is intentionally page motion, without liquid pinch.
+                    translationY = homePathCenter?.let { it.y - shellHeight / 2f }
+                        ?: (source.top * (1f - p) +
+                            if (openingDownward) {
+                                4f * arcHeight * p * (1f - p) * if (closing) -1f else 1f
+                            } else {
+                                -4f * arcHeight * p * (1f - p)
+                            }),
+                    scale = scale,
+                    clipBottom = clipBottom,
+                    progress = p
+                )
+                values
+            }
         }
-        val values = AnchoredDetailMorphValues(
-            backgroundAlpha = (p * 0.22f).coerceIn(0f, 0.22f),
-            sourceAlpha = (1f - p * 3f).coerceIn(0f, 1f),
-            contentAlpha = ((p - 0.1f) / 0.5f).coerceIn(0f, 1f),
-            translationX = homePathCenter?.let { it.x - screenWidth / 2f }
-                ?: ((sourceCenterX - screenWidth / 2f) * (1f - p)),
-            // A quadratic arc keeps both endpoints exact while lifting the page through the
-            // middle of the transition. This is intentionally page motion, without liquid pinch.
-            translationY = homePathCenter?.let { it.y - shellHeight / 2f }
-                ?: (source.top * (1f - p) +
-                    if (openingDownward) {
-                        4f * arcHeight * p * (1f - p) * if (closing) -1f else 1f
-                    } else {
-                        -4f * arcHeight * p * (1f - p)
-                    }),
-            scale = scale,
-            clipBottom = clipBottom,
-            progress = p
-        )
-        val valuesState = rememberUpdatedState(values)
         val clipShape = remember(
+            valuesState,
+            nativeRoundClip,
             source,
             screenWidth,
             sourceCornerRadius,
@@ -1101,14 +1115,20 @@ private fun BoxScope.AnchoredSettingsStyleMorph(
                 screenWidth = screenWidth,
                 screenCornerRadiusPx = targetCornerRadiusPx,
                 sourceCornerRadiusPx = with(density) { sourceCornerRadius.toPx() },
-                values = valuesState
+                values = valuesState,
+                nativeRoundClip = nativeRoundClip
             )
         }
-        val fullOpenEndpoint = !detailMorphUsesTransientClip(p, closing)
+        val sourceVisible by remember(valuesState) {
+            androidx.compose.runtime.derivedStateOf { valuesState.value.sourceAlpha > 0.001f }
+        }
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = values.backgroundAlpha))
+                .drawWithContent {
+                    drawRect(Color.Black.copy(alpha = valuesState.value.backgroundAlpha))
+                    drawContent()
+                }
                 .pointerInput(closing) {
                     awaitPointerEventScope {
                         while (true) awaitPointerEvent().changes.forEach { it.consume() }
@@ -1119,6 +1139,8 @@ private fun BoxScope.AnchoredSettingsStyleMorph(
             Modifier
                 .fillMaxSize()
                 .graphicsLayer {
+                    val values = valuesState.value
+                    val fullOpenEndpoint = !detailMorphUsesTransientClip(values.progress, closing)
                     transformOrigin = TransformOrigin(0.5f, 0f)
                     scaleX = values.scale
                     scaleY = values.scale
@@ -1140,7 +1162,7 @@ private fun BoxScope.AnchoredSettingsStyleMorph(
                     }
                 }
         ) {
-            if (values.sourceAlpha > 0.001f) {
+            if (sourceVisible) {
                 if (sourceSnapshot != null) {
                     Image(
                         bitmap = sourceSnapshot.asImageBitmap(),
@@ -1149,10 +1171,9 @@ private fun BoxScope.AnchoredSettingsStyleMorph(
                             .fillMaxWidth()
                             .height(with(density) { initialClipBottom.toDp() })
                             .graphicsLayer {
-                                alpha = values.sourceAlpha
-                                shape = RoundedRectangle(
-                                    sourceCornerRadius / initialScale
-                                )
+                                alpha = valuesState.value.sourceAlpha
+                                shape = if (nativeRoundClip) androidx.compose.foundation.shape.RoundedCornerShape(sourceCornerRadius / initialScale)
+                                    else RoundedRectangle(sourceCornerRadius / initialScale)
                                 clip = true
                             },
                         contentScale = ContentScale.FillBounds
@@ -1162,12 +1183,12 @@ private fun BoxScope.AnchoredSettingsStyleMorph(
                         Modifier
                             .fillMaxWidth()
                             .height(with(density) { (source.height / initialScale).toDp() })
-                            .graphicsLayer { alpha = values.sourceAlpha },
+                            .graphicsLayer { alpha = valuesState.value.sourceAlpha },
                         content = sourceContent
                     )
                 }
             }
-            Box(Modifier.fillMaxSize().graphicsLayer { alpha = values.contentAlpha }) {
+            Box(Modifier.fillMaxSize().graphicsLayer { alpha = valuesState.value.contentAlpha }) {
                 content(onClose)
             }
         }

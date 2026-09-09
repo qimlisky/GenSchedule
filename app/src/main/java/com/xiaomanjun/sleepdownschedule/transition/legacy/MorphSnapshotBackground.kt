@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.foundation.shape.CornerSize
 import com.kyant.shapes.RoundedRectangle
-import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.drawContinuousRoundRect
 import androidx.compose.ui.graphics.addOutline
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LocalContentColor
@@ -51,7 +50,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.RoundRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.BlendMode
@@ -94,6 +92,7 @@ internal fun MirroredEdgeSnapshot(
     alphaProvider: () -> Float,
     modifier: Modifier = Modifier
 ) {
+    val edgeEffect = remember(blurPx) { platformBlurRenderEffect(blurPx) }
     val shader = remember(bitmap) {
         BitmapShader(bitmap, Shader.TileMode.MIRROR, Shader.TileMode.MIRROR)
     }
@@ -106,7 +105,7 @@ internal fun MirroredEdgeSnapshot(
         modifier = modifier
             .graphicsLayer {
                 this.alpha = alphaProvider().coerceIn(0f, 1f)
-                renderEffect = platformBlurRenderEffect(blurPx)
+                renderEffect = edgeEffect
             }
             .drawWithCache {
                 val insetX = size.width * insetFraction.coerceIn(0f, 0.49f)
@@ -153,6 +152,7 @@ internal fun MorphSnapshotBackground(
 internal fun MorphSnapshotBackground(
     bitmap: Bitmap,
     backgroundScaleProvider: () -> Float,
+    nativeRoundClip: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -188,12 +188,18 @@ internal fun MorphSnapshotBackground(
                     val shrinkProgress = ((1f - scale) / 0.08f).coerceIn(0f, 1f)
                     if (shrinkProgress > 0.001f) {
                         val radiusPx = 24.dp.toPx() * shrinkProgress
+                        // All eleven draws share the same continuous outline. Building it inside
+                        // each feather stroke multiplies path construction during every frame.
+                        val roundedShape = if (nativeRoundClip) androidx.compose.foundation.shape.RoundedCornerShape(radiusPx.toDp())
+                            else RoundedRectangle(radiusPx.toDp())
+                        val roundedOutline = roundedShape.createOutline(
+                            size, layoutDirection, this@drawWithContent
+                        )
+                        val roundedPath = Path().apply { addOutline(roundedOutline) }
                         val outside = Path().apply {
                             fillType = PathFillType.EvenOdd
                             addRect(Rect(0f, 0f, size.width, size.height))
-                            addOutline(RoundedRectangle(radiusPx.toDp()).createOutline(
-                                size, layoutDirection, this@drawWithContent
-                            ))
+                            addPath(roundedPath)
                         }
                         drawPath(outside, Color.Black, blendMode = BlendMode.Clear)
 
@@ -202,9 +208,14 @@ internal fun MorphSnapshotBackground(
                         repeat(featherSteps) { index ->
                             val linear = 1f - index / featherSteps.toFloat()
                             val remaining = linear * linear * (3f - 2f * linear)
-                            drawContinuousRoundRect(
+                            if (nativeRoundClip) drawRoundRect(
                                 color = Color.Black.copy(alpha = 0.115f),
-                                cornerRadius = CornerRadius(radiusPx, radiusPx),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(radiusPx, radiusPx),
+                                style = Stroke(width = featherPx * 2f * remaining),
+                                blendMode = BlendMode.DstOut
+                            ) else drawPath(
+                                path = roundedPath,
+                                color = Color.Black.copy(alpha = 0.115f),
                                 style = Stroke(width = featherPx * 2f * remaining),
                                 blendMode = BlendMode.DstOut
                             )

@@ -54,6 +54,14 @@ internal fun GlassEffectFrame.decorationOnly(): GlassEffectFrame = copy(
     useVibrancy = false
 )
 
+/** Decoration and placement changes must not invalidate the observed blur/refraction inputs. */
+internal fun GlassEffectFrame.materialEffectsOnly(): GlassEffectFrame = copy(
+    highlight = null,
+    shadowAlpha = null,
+    innerShadow = null,
+    layerScale = null
+)
+
 /** Keeps the layer origin stable while reducing its actual allocation and local SDF geometry. */
 internal fun GlassGroupLayerPlan.sampled(sampleScale: Float): GlassGroupLayerPlan {
     val scale = sampleScale.coerceIn(0.5f, 1f)

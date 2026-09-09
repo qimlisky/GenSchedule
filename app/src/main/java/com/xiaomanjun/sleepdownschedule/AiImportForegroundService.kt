@@ -11,6 +11,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.drawable.Icon
 import android.os.IBinder
 import android.os.Process
 import android.os.SystemClock
@@ -187,7 +188,8 @@ class AiImportForegroundService : Service() {
             status: String
         ): Notification {
             val builder = Notification.Builder(context, RUNNING_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_agent_thinking)
+                .setSmallIcon(R.mipmap.ic_launcher_light)
+                .setLargeIcon(Icon.createWithResource(context, R.mipmap.ic_launcher_light))
                 .setContentTitle("SleepDown · AI 导入")
                 .setContentText(status.ifBlank { "正在整理输入" })
                 .setContentIntent(progressPendingIntent(context, taskId, 8401))
@@ -216,7 +218,8 @@ class AiImportForegroundService : Service() {
             courseCount: Int
         ): Notification {
             return Notification.Builder(context, RESULT_CHANNEL_ID)
-                .setSmallIcon(R.drawable.ic_agent_thinking)
+                .setSmallIcon(R.mipmap.ic_launcher_light)
+                .setLargeIcon(Icon.createWithResource(context, R.mipmap.ic_launcher_light))
                 .setContentTitle("课表解析完成 · 发现 ${courseCount} 门课程")
                 .setContentText("点击查看导入预览")
                 .setContentIntent(progressPendingIntent(context, taskId, 8402))

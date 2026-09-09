@@ -1,4 +1,11 @@
 package com.xiaomanjun.sleepdownschedule.feature.course.editor
+import com.xiaomanjun.sleepdownschedule.glass.GlassMorphAllocation
+import com.xiaomanjun.sleepdownschedule.glass.GlassTransitionGeometry
+import com.xiaomanjun.sleepdownschedule.glass.GlassMotionExperiments
+import com.xiaomanjun.sleepdownschedule.glass.sampleGlassTransitionEnvelope
+import com.xiaomanjun.sleepdownschedule.glass.isAllocationEfficientFor
+import com.xiaomanjun.sleepdownschedule.glass.glassMorphHost
+import com.xiaomanjun.sleepdownschedule.glass.glassMorphContent
 
 import com.xiaomanjun.sleepdownschedule.glass.ui.*
 import com.xiaomanjun.sleepdownschedule.feature.home.*
@@ -118,13 +125,14 @@ internal const val CourseEditorCloseDurationMillis = 440
 internal const val BackgroundZoomOpenScale = 1.08f
 private const val BackgroundZoomDelayMillis = 40
 private const val BackgroundZoomOpenDurationMillis = 560
-private const val BackgroundZoomCloseDurationMillis = 560
+private const val BackgroundZoomCloseDurationMillis = CourseEditorCloseDurationMillis
 private val BackgroundZoomInertialEasing = CubicBezierEasing(0.30f, 0.0f, 0.20f, 1.0f)
 // How small the real form starts inside the morphing shell. This is a settle scale, not a
 // fit-to-source scale: the shell's clip does the reveal, so keep it close to 1. Lower values
 // reintroduce the shrunken-thumbnail look; 1.0 removes the sense of the content growing.
 private const val CourseEditorContentSettleScale = 0.94f
-private const val CourseEditorPreparedFrameCount = 2
+// Preparing contains only the shell; the form and its Pager mount at Open.
+private const val CourseEditorPreparedFrameCount = 1
 // Each row settles over 340ms; 15ms staggering keeps the full reveal compact at 520ms.
 internal const val CourseEditorFormRevealDurationMillis = 520
 private val CourseEditorRowRevealEasing = CubicBezierEasing(0.22f, 0f, 0.30f, 1f)
@@ -336,15 +344,13 @@ internal fun CourseEditorContainerOverlayHost(
                         )
                     )
                 }
-                // Mirror the open: the background keeps easing back after the card has
-                // collapsed, so closing reads as the home surface settling home rather
-                // than snapping with the card.
+                // Finish the background together with the card so material restoration does
+                // not wait for an additional invisible Closing tail.
                 launch {
                     motionState.backgroundZoom.animateTo(
                         targetValue = 1f,
                         animationSpec = tween(
                             durationMillis = BackgroundZoomCloseDurationMillis,
-                            delayMillis = BackgroundZoomDelayMillis,
                             easing = BackgroundZoomInertialEasing
                         )
                     )
@@ -489,6 +495,20 @@ internal fun CourseEditorContainerOverlayHost(
         )
     }
     val rawProgress = progress.value.coerceIn(0f, 1f)
+    val materialEnvelope = remember(morphSpec, sourceRect, targetRect) {
+        if (!GlassMotionExperiments.fixedMorph) null else {
+            sampleGlassTransitionEnvelope(
+                tracks = LiquidMorphDirection.entries.map { direction ->
+                    { p: Float ->
+                        val frame = morphSpec.frame(LiquidMorphInput(sourceRect, targetRect, p, direction))
+                        GlassTransitionGeometry(frame.rect, frame.cornerRadiusPx)
+                    }
+                },
+                steps = 256,
+                effectPaddingPx = 2f
+            ).takeIf { it.isAllocationEfficientFor(GlassTransitionGeometry(targetRect, 0f), 1.65f) }
+        }
+    }
     val closingMorph = overlayPhase == CourseEditorOverlayPhase.Closing ||
         overlayPhase == CourseEditorOverlayPhase.Disposing
     val morphFrame = morphSpec.frame(
@@ -513,6 +533,17 @@ internal fun CourseEditorContainerOverlayHost(
     )
     val sizeProgress = morphFrame.shapeProgress
     val animatedRect = morphFrame.rect
+    val materialGeometry = rememberUpdatedState(GlassTransitionGeometry(animatedRect,
+        with(density) { morphFrame.cornerRadiusPx.coerceIn(6.dp.toPx(), 36.dp.toPx()) }))
+    val fixedMaterialEligible = config.courseCardGlassEnabled && config.hasAnyWallpaper() &&
+        backdrop != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
+    val materialAllocation = remember(materialEnvelope, overlayPhase, config.courseCardBlur, density.density, fixedMaterialEligible) {
+        if (materialEnvelope == null || overlayPhase == CourseEditorOverlayPhase.Open ||
+            !fixedMaterialEligible) null else {
+            GlassMorphAllocation(materialEnvelope, { materialGeometry.value },
+                with(density) { maxOf(config.courseCardBlur, 10f).dp.toPx() })
+        }
+    }
     val animatedModifier = Modifier
         .offset {
             IntOffset(
@@ -591,11 +622,13 @@ internal fun CourseEditorContainerOverlayHost(
             corner = corner,
             progress = sizeProgress,
             alpha = morphSurfaceAlpha,
-            modifier = animatedModifier
+            modifier = if (materialAllocation == null) animatedModifier else Modifier.glassMorphHost(materialAllocation),
+            morphAllocation = materialAllocation
         ) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .then(if (materialAllocation != null) Modifier.glassMorphContent(materialAllocation) else Modifier)
                     .clip(RoundedRectangle(corner))
             ) {
                 if (editorContentMounted) {
@@ -785,21 +818,19 @@ private fun CourseEditorScaledContentLayer(
                             !formMounted &&
                             formClosingShellRecorded.compareAndSet(false, true)
                     if (phase == CourseEditorOverlayPhase.Preparing ||
-                        phase == CourseEditorOverlayPhase.Open ||
                         formClosingShellRecord
                     ) {
                         editorContentLayer.record {
                             this@drawWithContent.drawContent()
                         }
                         if (phase == CourseEditorOverlayPhase.Preparing) {
-                            // HorizontalPager needs a second target-size placement before this
-                            // layer becomes the moving replay.
-                            // Count completed recordings rather than merely the outer size callback
-                            // so Opening can never reuse the Pager's provisional first layout.
+                            // Only the empty shell is prepared here; no Pager is mounted yet.
                             onContentRecorded()
                         }
                     }
                     if (phase == CourseEditorOverlayPhase.Open) {
+                        // Closing records an empty shell, so caching the live form here only
+                        // records the complete input/Backdrop tree a second time for no consumer.
                         this@drawWithContent.drawContent()
                     } else {
                         // The form keeps its real target-size layout, but Opening/Closing replay
@@ -862,6 +893,7 @@ private fun CourseEditorAnimatedContainer(
     progress: Float,
     alpha: Float,
     modifier: Modifier = Modifier,
+    morphAllocation: GlassMorphAllocation? = null,
     content: @Composable () -> Unit
 ) {
     val shape = RoundedRectangle(corner)
@@ -877,7 +909,8 @@ private fun CourseEditorAnimatedContainer(
         course = course,
         modifier = modifier.graphicsLayer { this.alpha = alpha },
         shape = shape,
-        blurOverride = editorBlur
+        blurOverride = editorBlur,
+        morphAllocation = morphAllocation
     ) {
         Box(Modifier.fillMaxSize()) {
             content()

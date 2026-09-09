@@ -23,6 +23,32 @@ import org.junit.Test
 
 class AgentToolsTest {
     @Test
+    fun responsesCompletedTextWorksWithoutDeltasAndIsNotDuplicated() {
+        val completed = Json.parseToJsonElement("""{"type":"response.completed","response":{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"请确认。"}]}]}}""").jsonObject
+        val onlyCompleted = AgentResponsesTextAccumulator()
+        assertEquals("请确认。", onlyCompleted.consume(completed))
+        assertEquals("请确认。", onlyCompleted.finish())
+        val streamed = AgentResponsesTextAccumulator()
+        assertEquals("请确认。", streamed.consume(Json.parseToJsonElement("""{"type":"response.output_text.delta","delta":"请确认。"}""").jsonObject))
+        assertEquals("", streamed.consume(completed))
+        assertEquals("请确认。", streamed.finish())
+    }
+
+    @Test(expected = IllegalStateException::class)
+    fun incompleteResponsesCannotBecomeAnExecutableAnswer() {
+        val accumulator = AgentResponsesTextAccumulator()
+        accumulator.consume(Json.parseToJsonElement("""{"type":"response.output_text.delta","delta":"部分计划"}""").jsonObject)
+        accumulator.consume(Json.parseToJsonElement("""{"type":"response.incomplete","response":{"status":"incomplete"}}""").jsonObject)
+    }
+
+    @Test
+    fun responsesNullContentDoesNotHideTheFollowingAnswer() {
+        val turn = parseAgentResponsesTurn("""{"output":[{"type":"reasoning","summary":null},{"type":"message","content":null},{"type":"message","content":[{"type":"output_text","text":"请确认清空备注。"}]}]}""")
+        assertEquals("请确认清空备注。", turn.content)
+        assertTrue(parseAgentResponsesTurn("""{"output":null}""").calls.isEmpty())
+    }
+
+    @Test
     fun courseReadToolExposesExactCustomTimeToTheAgent() {
         val course = CourseEntity(
             id = 7L,
@@ -55,7 +81,8 @@ class AgentToolsTest {
             facts
         ).single()
 
-        assertTrue(result.content.contains("自定义时间=10:10-11:55"))
+        assertTrue(result.content.contains("x=自定义时间"))
+        assertTrue(result.content.contains("|x=10:10-11:55"))
     }
 
     @Test

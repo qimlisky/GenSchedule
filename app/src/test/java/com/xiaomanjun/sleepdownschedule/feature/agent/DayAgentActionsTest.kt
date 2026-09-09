@@ -236,6 +236,46 @@ class DayAgentActionsTest {
         assertFalse(parsed.displayText.contains("actions"))
     }
 
+    @Test
+    fun clearsAllSemesterNotesWithoutChangingOtherFields() {
+        val courses = (1L..3L).map { id ->
+            slot("同名课程", "教室", 8, 0, 8, 45).course.copy(
+                id = id, note = "原备注$id", weeks = listOf(id.toInt()), scheduleId = 7
+            )
+        }
+        val facts = factsAt(9, 0, emptyList()).copy(
+            semesterCourses = courses, totalWeeks = 18, currentWeek = 1, scheduleId = 7,
+            periodDefinitions = listOf(PeriodEntity(1, "08:00", "08:45", 7))
+        )
+        val payload = courses.joinToString(",") {
+            """{"type":"UPDATE_COURSE","courseId":${it.id},"scope":"ALL_WEEKS","course":{"note":""}}"""
+        }
+        val parsed = parseAgentActions("请确认。<agent_actions>[$payload]</agent_actions>", facts)
+        assertEquals(3, parsed.actions.size)
+        val plan = AgentPlan(parsed.actions)
+        val preview = previewAgentPlan(courses, plan)
+        assertEquals(courses.map { it.copy(note = null) }, preview.after)
+        assertTrue(verifyAgentPlan(preview.after, plan))
+        assertFalse(verifyAgentPlan(courses, plan))
+        val tool = executeAgentReadTools(
+            listOf(AgentToolCall("semester", AgentToolName.GET_SEMESTER_SCHEDULE)), facts
+        ).single()
+        courses.forEach { assertTrue(tool.content.contains("n=${it.note}")) }
+    }
+
+    @Test
+    fun omittedOrNullNoteIsPreservedButWhitespaceClears() {
+        val original = slot("课程", "教室", 8, 0, 8, 45).course.copy(id = 7, note = "保留", scheduleId = 7)
+        val facts = factsAt(9, 0, emptyList()).copy(
+            semesterCourses = listOf(original), totalWeeks = 18, scheduleId = 7,
+            periodDefinitions = listOf(PeriodEntity(1, "08:00", "08:45", 7))
+        )
+        for ((patch, expected) in listOf("{}" to "保留", """{"note":null}""" to "保留", """{"note":"  "}""" to null)) {
+            val content = """<agent_actions>[{"type":"UPDATE_COURSE","courseId":7,"scope":"ALL_WEEKS","course":$patch}]</agent_actions>"""
+            assertEquals(expected, parseAgentActions(content, facts).actions.single().edited?.note)
+        }
+    }
+
     private fun factsAt(
         hour: Int,
         minute: Int,

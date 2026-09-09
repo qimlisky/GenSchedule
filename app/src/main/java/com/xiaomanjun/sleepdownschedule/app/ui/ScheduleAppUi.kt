@@ -29,6 +29,7 @@ import com.xiaomanjun.sleepdownschedule.feature.importing.shiguang.ShiguangWareh
 import com.xiaomanjun.sleepdownschedule.feature.importing.shiguang.uninstallShiguangRuntime
 
 import com.xiaomanjun.sleepdownschedule.core.identity.AppDistribution
+import com.xiaomanjun.sleepdownschedule.core.identity.currentIconResId
 import com.xiaomanjun.sleepdownschedule.feature.backup.*
 import com.xiaomanjun.sleepdownschedule.feature.update.*
 import com.xiaomanjun.sleepdownschedule.feature.widget.*
@@ -330,7 +331,8 @@ import com.xiaomanjun.sleepdownschedule.glass.rememberGlassSceneState
 import com.xiaomanjun.sleepdownschedule.glass.GlassBackendPolicy
 import com.xiaomanjun.sleepdownschedule.glass.CourseGlassMaterialRevealDurationMillis
 import com.xiaomanjun.sleepdownschedule.glass.CourseGlassOcclusionTrace
-import com.xiaomanjun.sleepdownschedule.glass.CourseGlassRestoreCadenceNanos
+import com.xiaomanjun.sleepdownschedule.glass.CourseGlassRestoreGroupsPerBatch
+import com.xiaomanjun.sleepdownschedule.glass.courseGlassRestoreFrameDue
 import com.xiaomanjun.sleepdownschedule.glass.CourseGlassRestoreRegistry
 import com.xiaomanjun.sleepdownschedule.glass.LocalCourseGlassMaterialRevealProgress
 import com.xiaomanjun.sleepdownschedule.glass.LocalCourseGlassRestoreRegistry
@@ -1153,7 +1155,7 @@ fun CourseScheduleAppUi(
         GiteeAppUpdater.restoreCachedStatus(context, currentVersionName)
         if (!state.config.autoCheckUpdates || !GiteeAppUpdater.shouldRunDailyCheck(context)) return@LaunchedEffect
         GiteeAppUpdater.markDailyCheckStarted(context)
-        GiteeAppUpdater.checkForUpdate(currentVersionName).onSuccess { result ->
+        GiteeAppUpdater.checkForUpdate(context, currentVersionName).onSuccess { result ->
             GiteeAppUpdater.recordCheckResult(context, result)
             if (result is GiteeUpdateCheckResult.UpdateAvailable) {
                 automaticUpdateDialog = SettingsUpdateDialog.Available(result.release)
@@ -1161,6 +1163,10 @@ fun CourseScheduleAppUi(
         }
     }
     val wallpaperImages by rememberHomeWallpaperImages(visualState.config)
+    val homeWallpaperRecordKey = remember { mutableStateOf<Any?>(null) }
+    val updateHomeWallpaperRecordKey: (Any?) -> Unit = remember {
+        { homeWallpaperRecordKey.value = it }
+    }
     val homeReadabilityContext = remember(
         wallpaperImages.readabilityBitmap,
         visualState.config,
@@ -1565,7 +1571,7 @@ fun CourseScheduleAppUi(
                 homeMenuDestinationMotionState.phase != HomeAnchoredOverlayPhase.Idle
         val courseEditorActive =
             courseEditorRequest != null || courseEditorOverlayPhase != CourseEditorOverlayPhase.Idle
-        shouldUseFrozenHomeMorphBlur(
+        !com.xiaomanjun.sleepdownschedule.glass.GlassMotionExperiments.continuousMaterialDrawing && shouldUseFrozenHomeMorphBlur(
             screenIsHome = screen is Screen.Home,
             previewActive = personalizationSliderPreviewKey != null ||
                 personalizationPreviewProgress > 0.001f,
@@ -1580,7 +1586,7 @@ fun CourseScheduleAppUi(
                 homeMenuDestinationMotionState.phase != HomeAnchoredOverlayPhase.Idle
         val courseEditorActive =
             courseEditorRequest != null || courseEditorOverlayPhase != CourseEditorOverlayPhase.Idle
-        shouldReuseWeekHomeSurface(
+        !com.xiaomanjun.sleepdownschedule.glass.GlassMotionExperiments.continuousMaterialDrawing && shouldReuseWeekHomeSurface(
             screenIsHome = screen is Screen.Home,
             homeMode = homeMode,
             previewActive = personalizationSliderPreviewKey != null ||
@@ -1610,6 +1616,7 @@ fun CourseScheduleAppUi(
     val courseGlassPersonalizationPreviewActive =
         personalizationSliderPreviewKey != null || personalizationPreviewProgress > 0.001f
     val weekCourseGlassOcclusionEligible =
+        !com.xiaomanjun.sleepdownschedule.glass.GlassMotionExperiments.continuousMaterialDrawing &&
         BuildConfig.SLEEPDOWN_LARGE_GLASS_EXPERIMENT &&
             screen is Screen.Home &&
             homeMode == HomeMode.Week &&
@@ -1767,13 +1774,18 @@ fun CourseScheduleAppUi(
         val groups = courseGlassRestoreRegistry.orderedGroupKeys(homeDisplayWeek)
             .ifEmpty { courseGlassFrozenRestoreGroupKeys }
         courseGlassFrozenRestoreGroupKeys = groups
+        val currentPageKeys = courseGlassRestoreRegistry.pageKeys(homeDisplayWeek)
         var restored = emptySet<String>()
         var previousRestoreTimestamp = 0L
-        groups.forEachIndexed { index, groupKey ->
+        // Restore a bounded pair per batch; one-group serialization made dense schedules
+        // wait for every current/adjacent-page group before any material could fade in.
+        suspend fun restoreBatchKeys(keys: List<String>) {
+        keys.chunked(CourseGlassRestoreGroupsPerBatch).forEachIndexed { index, groupKeys ->
             if (index > 0) {
                 while (true) {
                     val frameTimestamp = withFrameNanos { it }
-                    if (frameTimestamp - previousRestoreTimestamp >= CourseGlassRestoreCadenceNanos) {
+                    // Allow timestamp jitter at 60 Hz instead of accidentally waiting two frames.
+                    if (courseGlassRestoreFrameDue(previousRestoreTimestamp, frameTimestamp)) {
                         previousRestoreTimestamp = frameTimestamp
                         break
                     }
@@ -1781,15 +1793,21 @@ fun CourseScheduleAppUi(
             } else {
                 previousRestoreTimestamp = withFrameNanos { it }
             }
-            restored = restored + groupKey
+            restored = restored + groupKeys
             courseGlassRestoredGroupKeys = restored
             CourseGlassOcclusionTrace.recordPostCloseRestoreFrame()
         }
+        }
+        restoreBatchKeys(groups.filter { it in currentPageKeys })
 
         // All material nodes now exist at alpha zero. Crossfade only their sampled surface and
         // decoration over the stable flat cards; text/layout never participate in this animation.
         courseGlassOcclusionPhase = CourseGlassOcclusionPhase.Revealing
         withFrameNanos { }
+        coroutineScope {
+        launch {
+            restoreBatchKeys(groups.filterNot { it in currentPageKeys })
+        }
         courseGlassMaterialRevealProgress.animateTo(
             targetValue = 1f,
             animationSpec = tween(
@@ -1797,6 +1815,7 @@ fun CourseScheduleAppUi(
                 easing = CubicBezierEasing(0.22f, 0f, 0.18f, 1f)
             )
         )
+        }
         courseGlassOcclusionPhase = CourseGlassOcclusionPhase.Live
         lastRecordedHomeFrameKey.set(null)
         courseGlassRestoredGroupKeys = emptySet()
@@ -2248,7 +2267,21 @@ fun CourseScheduleAppUi(
     ) {
     val sharedTransitionScope = this
     val activeSharedTransitionScope = if (startupPhase == StartupPhase.FullQuality) sharedTransitionScope else null
+    val sharedCourseFrame = courseCardGlassEffectFrame(
+        tokens = GlassTokens.courseCard(visualState.config.courseCardBlur),
+        liveBlur = personalizationPreviewState.cardBlur ?: visualState.config.courseCardBlur,
+        quality = glassQuality,
+        hasWallpaper = visualState.config.hasAnyWallpaper()
+    )
+    val sharedCourseRadiusPx = with(LocalDensity.current) { (sharedCourseFrame.blur ?: 0.dp).toPx() }
+    val sharedCourseBackdrop = remember(backgroundBackdrop, sharedCourseRadiusPx, sharedCourseFrame.useVibrancy) {
+        com.kyant.backdrop.backdrops.SharedBlurBackdrop(backgroundBackdrop, sharedCourseRadiusPx, sharedCourseFrame.useVibrancy)
+    }
+    val useSharedCourseBackdrop = screen is Screen.Home && visualState.config.courseCardGlassEnabled &&
+        wallpaperImages.source != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     CompositionLocalProvider(
+        com.xiaomanjun.sleepdownschedule.glass.LocalSharedCourseBackdrop provides
+            sharedCourseBackdrop.takeIf { useSharedCourseBackdrop },
         LocalSharedTransitionScope provides activeSharedTransitionScope,
         LocalEditingCourseId provides editingCourseId,
         LocalStartupPhase provides startupPhase,
@@ -2632,7 +2665,14 @@ fun CourseScheduleAppUi(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .glassBackdropProducer(backgroundBackdrop)
+                        .glassBackdropProducer(backgroundBackdrop, recordKey = {
+                            if (screen is Screen.Home && visualState.loaded && wallpaperImages.source != null) {
+                                homeWallpaperRecordKey.value?.let { imageKey ->
+                                    listOf(imageKey, personalizationPreviewState.wallpaperBrightness
+                                        ?: visualState.config.wallpaperBrightness)
+                                }
+                            } else null
+                        })
                 ) {
                     if (screen is Screen.Home) {
                         if (!visualState.loaded) {
@@ -2646,7 +2686,8 @@ fun CourseScheduleAppUi(
                                     wallpaperImages,
                                     startupPhase,
                                     reduceQuality = reduceWallpaperQualityForCourseEditor,
-                                    previewState = personalizationPreviewState
+                                    previewState = personalizationPreviewState,
+                                    onRecordKeyChanged = updateHomeWallpaperRecordKey
                                 )
                                 WallpaperGlassSamplingToneOverlay(
                                     visualState.config,
@@ -2675,6 +2716,14 @@ fun CourseScheduleAppUi(
                     wallpaperImages.source != null
                 ) {
                     WallpaperToneOverlay(visualState.config, personalizationPreviewState)
+                }
+                if (useSharedCourseBackdrop) {
+                    Box(Modifier.fillMaxSize().then(sharedCourseBackdrop.preRenderModifier {
+                        homeWallpaperRecordKey.value?.let { imageKey ->
+                            listOf(imageKey, personalizationPreviewState.wallpaperBrightness
+                                ?: visualState.config.wallpaperBrightness)
+                        }
+                    }))
                 }
                 val contentModifier = Modifier
                     .fillMaxSize()
@@ -3629,6 +3678,7 @@ fun CourseScheduleAppUi(
                     return@QuickScheduleSettingsSheets
                 }
                 val activity = context.findActivity() ?: return@QuickScheduleSettingsSheets
+                val detailInputNanos = System.nanoTime()
                 appScope.launch {
                     suspend fun capturePopupFrame(): Bitmap? {
                         detailPopupCaptureActive = true
@@ -3689,6 +3739,9 @@ fun CourseScheduleAppUi(
                         bottom = sourceBoundsInWindow.bottom - snapshotOriginInWindow.y
                     )
                     val buttonSnapshot = fullSnapshot?.cropToAnchoredBounds(sourceBoundsInSnapshot)
+                    com.xiaomanjun.sleepdownschedule.glass.GlassBackendTrace.durationSince(
+                        "Detail.InputThroughCapture", detailInputNanos
+                    )
                     val openingAnchor = TransitionAnchorFrame(
                         boundsInWindow = sourceBoundsInWindow,
                         cornerRadiusPx = with(density) { 25.dp.toPx() },
@@ -3698,8 +3751,15 @@ fun CourseScheduleAppUi(
                     // place while saving gives the translucent destination an unchanged live
                     // underlay and ensures the first detailed-settings composition sees the
                     // committed values.
+                    val detailSaveNanos = System.nanoTime()
                     saveBeforeOpening {
+                        com.xiaomanjun.sleepdownschedule.glass.GlassBackendTrace.durationSince(
+                            "Detail.Save", detailSaveNanos
+                        )
                         appScope.launch {
+                            com.xiaomanjun.sleepdownschedule.glass.GlassBackendTrace.durationSince(
+                                "Detail.InputToOpenDispatch", detailInputNanos
+                            )
                             ActivityTransitionCoordinator.open(
                                 activity = activity,
                                 routeId = TransitionRouteId.QuickSheetToSettingsDetail,
@@ -4265,7 +4325,7 @@ fun CourseScheduleAppUi(
             onRetry = {
                 automaticUpdateDialog = SettingsUpdateDialog.Checking
                 appScope.launch {
-                    automaticUpdateDialog = GiteeAppUpdater.checkForUpdate(currentVersionName).fold(
+                    automaticUpdateDialog = GiteeAppUpdater.checkForUpdate(context, currentVersionName).fold(
                         onSuccess = { result ->
                             GiteeAppUpdater.recordCheckResult(context, result)
                             when (result) {
@@ -8045,7 +8105,7 @@ fun SettingsRootScreen(
         updateDialog = SettingsUpdateDialog.Checking
         GiteeAppUpdater.markDailyCheckStarted(context)
         scope.launch {
-            updateDialog = GiteeAppUpdater.checkForUpdate(versionName).fold(
+            updateDialog = GiteeAppUpdater.checkForUpdate(context, versionName).fold(
                 onSuccess = { result ->
                     GiteeAppUpdater.recordCheckResult(context, result)
                     when (result) {
@@ -8103,7 +8163,7 @@ fun SettingsRootScreen(
                     summary = "开发者：小漫君",
                     startAction = {
                         Image(
-                            painter = painterResource(R.mipmap.ic_launcher),
+                            painter = painterResource(currentIconResId(context, darkTheme)),
                             contentDescription = null,
                             modifier = Modifier
                                 .padding(end = 10.dp)
@@ -8543,7 +8603,7 @@ fun AboutSettingsScreen(state: AppState, backdrop: Backdrop?) {
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Image(
-                        painter = painterResource(R.mipmap.ic_launcher),
+                        painter = painterResource(currentIconResId(context, appUsesDarkTheme(state.config))),
                         contentDescription = null,
                         modifier = Modifier
                             .size(64.dp)
@@ -8830,6 +8890,7 @@ private fun AboutFeatureCard(
 @Composable
 private fun AboutHero(
     versionName: String,
+    iconResId: Int,
     titleBrush: Brush,
     collapseProgress: State<Float>,
     scrollOffsetPx: State<Float>,
@@ -8854,7 +8915,7 @@ private fun AboutHero(
         verticalArrangement = Arrangement.Center
     ) {
         Image(
-            painter = painterResource(R.mipmap.ic_launcher),
+            painter = painterResource(iconResId),
             contentDescription = null,
             modifier = Modifier
                 .size(116.dp)
@@ -9043,6 +9104,7 @@ fun ChangelogSettingsScreen(
             item(key = "about-hero") {
                 AboutHero(
                     versionName = versionName,
+                    iconResId = currentIconResId(context, darkTheme),
                     titleBrush = heroTitleGradient,
                     collapseProgress = heroCollapseProgress,
                     scrollOffsetPx = heroScrollOffsetPx,

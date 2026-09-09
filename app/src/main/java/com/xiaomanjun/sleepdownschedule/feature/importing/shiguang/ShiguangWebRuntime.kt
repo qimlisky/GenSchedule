@@ -192,10 +192,10 @@ internal class ShiguangWebRequestInterceptor {
             ?.value
         val requestIdParam = request.url.getQueryParameter("_webview_post_id")
         val requestId = requestIdHeader ?: requestIdParam
-        if (!request.isForMainFrame && requestId == null) return null
+        if (requestId == null) return null
 
         val url = request.url.withoutInternalPostId(requestIdParam != null)
-        val registeredData = requestId?.let(postBodyRegistry::remove)
+        val registeredData = postBodyRegistry.remove(requestId)
         if (!request.method.equals("GET", ignoreCase = true) && registeredData == null) return null
 
         val connection = (URL(url).openConnection() as HttpURLConnection).apply {

@@ -1,4 +1,6 @@
 package com.xiaomanjun.sleepdownschedule.glass.ui
+import com.xiaomanjun.sleepdownschedule.glass.insetShapeFor
+import androidx.compose.ui.graphics.drawscope.inset
 
 import com.xiaomanjun.sleepdownschedule.*
 import com.xiaomanjun.sleepdownschedule.app.ui.*
@@ -802,58 +804,21 @@ internal fun Modifier.verticalGlassAccent(
     shape: Shape,
     lightGlass: Boolean,
     intensity: Float = 1f,
-    expanded: Boolean = false
-): Modifier = this
-            .clip(shape)
+    expanded: Boolean = false,
+    morphAllocation: com.xiaomanjun.sleepdownschedule.glass.GlassMorphAllocation? = null
+): Modifier {
+    val bounds = morphAllocation?.localBounds()
+    val clipShape = morphAllocation?.let { it.envelope.insetShapeFor(it.geometry()) } ?: shape
+    return this
+            .clip(clipShape)
             .drawBehind {
-                // Perceptual response keeps the middle of the slider useful without allowing the
-                // sampled wallpaper brightness to dictate the light-source strength.
-                val lightStrength = sqrt(intensity.coerceIn(0f, 1f))
-                val colorStartY = if (expanded) 0.66f else 0.86f
-                val colorLiftY = if (expanded) 0.80f else 0.92f
-                val colorRimY = if (expanded) 0.92f else 0.97f
-                val whiteStartY = if (expanded) 0.72f else 0.89f
-                val whiteLiftY = if (expanded) 0.88f else 0.96f
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to Color.Black.copy(alpha = if (lightGlass) 0.014f else 0.022f),
-                            0.18f to Color.Black.copy(alpha = if (lightGlass) 0.010f else 0.016f),
-                            0.32f to Color.Black.copy(alpha = if (lightGlass) 0.006f else 0.009f),
-                            0.46f to Color.Transparent,
-                            1f to Color.Transparent
-                        ),
-                        endY = size.height
-                    )
-                )
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to Color.Transparent,
-                            colorStartY to Color.Transparent,
-                            colorLiftY to accentColor.copy(alpha = 0.040f * lightStrength),
-                            colorRimY to accentColor.copy(
-                                alpha = (if (lightGlass) 0.18f else 0.21f) * lightStrength
-                            ),
-                            1f to accentColor.copy(
-                                alpha = (if (lightGlass) 0.30f else 0.34f) * lightStrength
-                            )
-                        ),
-                        endY = size.height
-                    ),
-                    blendMode = BlendMode.Plus
-                )
-                drawRect(
-                    brush = Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to Color.Transparent,
-                            whiteStartY to Color.Transparent,
-                            whiteLiftY to Color.White.copy(alpha = 0.042f * lightStrength),
-                            1f to Color.White.copy(alpha = 0.082f * lightStrength)
-                        ),
-                        endY = size.height
-                    )
-                )
+                if (bounds == null) {
+                    drawVerticalGlassAccent(accentColor, lightGlass, intensity, expanded)
+                } else {
+                    inset(bounds.left, bounds.top, size.width - bounds.right, size.height - bounds.bottom) {
+                        drawVerticalGlassAccent(accentColor, lightGlass, intensity, expanded)
+                    }
+                }
             }
             .border(
                 width = 1.dp,
@@ -865,10 +830,13 @@ internal fun Modifier.verticalGlassAccent(
                         1f to Color.White.copy(
                             alpha = 0.20f * sqrt(intensity.coerceIn(0f, 1f))
                         )
-                    )
+                    ),
+                    startY = bounds?.top ?: 0f,
+                    endY = bounds?.bottom ?: Float.POSITIVE_INFINITY
                 ),
-                shape = shape
+                shape = clipShape
             )
+}
 
 @Composable
 internal fun VerticalGlassAccentOverlay(
@@ -877,7 +845,8 @@ internal fun VerticalGlassAccentOverlay(
     lightGlass: Boolean,
     intensity: Float = 1f,
     expanded: Boolean = false,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    morphAllocation: com.xiaomanjun.sleepdownschedule.glass.GlassMorphAllocation? = null
 ) {
     Box(
         modifier.verticalGlassAccent(
@@ -885,7 +854,64 @@ internal fun VerticalGlassAccentOverlay(
             shape = shape,
             lightGlass = lightGlass,
             intensity = intensity,
-            expanded = expanded
+            expanded = expanded,
+            morphAllocation = morphAllocation
+        )
+    )
+}
+
+private fun DrawScope.drawVerticalGlassAccent(
+    accentColor: Color,
+    lightGlass: Boolean,
+    intensity: Float,
+    expanded: Boolean
+) {
+    // Perceptual response keeps the middle of the slider useful without allowing the
+    // sampled wallpaper brightness to dictate the light-source strength.
+    val lightStrength = sqrt(intensity.coerceIn(0f, 1f))
+    val colorStartY = if (expanded) 0.66f else 0.86f
+    val colorLiftY = if (expanded) 0.80f else 0.92f
+    val colorRimY = if (expanded) 0.92f else 0.97f
+    val whiteStartY = if (expanded) 0.72f else 0.89f
+    val whiteLiftY = if (expanded) 0.88f else 0.96f
+    drawRect(
+        brush = Brush.verticalGradient(
+            colorStops = arrayOf(
+                0f to Color.Black.copy(alpha = if (lightGlass) 0.014f else 0.022f),
+                0.18f to Color.Black.copy(alpha = if (lightGlass) 0.010f else 0.016f),
+                0.32f to Color.Black.copy(alpha = if (lightGlass) 0.006f else 0.009f),
+                0.46f to Color.Transparent,
+                1f to Color.Transparent
+            ),
+            endY = size.height
+        )
+    )
+    drawRect(
+        brush = Brush.verticalGradient(
+            colorStops = arrayOf(
+                0f to Color.Transparent,
+                colorStartY to Color.Transparent,
+                colorLiftY to accentColor.copy(alpha = 0.040f * lightStrength),
+                colorRimY to accentColor.copy(
+                    alpha = (if (lightGlass) 0.18f else 0.21f) * lightStrength
+                ),
+                1f to accentColor.copy(
+                    alpha = (if (lightGlass) 0.30f else 0.34f) * lightStrength
+                )
+            ),
+            endY = size.height
+        ),
+        blendMode = BlendMode.Plus
+    )
+    drawRect(
+        brush = Brush.verticalGradient(
+            colorStops = arrayOf(
+                0f to Color.Transparent,
+                whiteStartY to Color.Transparent,
+                whiteLiftY to Color.White.copy(alpha = 0.042f * lightStrength),
+                1f to Color.White.copy(alpha = 0.082f * lightStrength)
+            ),
+            endY = size.height
         )
     )
 }
@@ -939,16 +965,21 @@ fun CourseGlassCard(
     blurOverride: Float? = null,
     renderSurface: Boolean = true,
     mountMaterial: Boolean = true,
+    viewportMaterialVisible: Boolean = true,
     backdropSampleScale: Float = 1f,
     sampledShape: Shape? = null,
     expandedOutlineLight: Boolean = false,
+    morphAllocation: com.xiaomanjun.sleepdownschedule.glass.GlassMorphAllocation? = null,
     onClick: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     val occlusionPhase = LocalCourseGlassOcclusionPhase.current
     val materialRevealProgress = LocalCourseGlassMaterialRevealProgress.current
-    val mountMaterialNodes =
+    val occlusionAllowsMaterial =
         mountMaterial && occlusionPhase.mountsMaterialNodes
+    val drawMaterialNodes = occlusionAllowsMaterial && viewportMaterialVisible
+    val mountMaterialNodes = occlusionAllowsMaterial ||
+        com.xiaomanjun.sleepdownschedule.glass.GlassMotionExperiments.retainMaterialNodes
     val materialCrossfadeActive =
         occlusionPhase == CourseGlassOcclusionPhase.PostCloseRestore ||
             occlusionPhase == CourseGlassOcclusionPhase.Revealing
@@ -1006,10 +1037,23 @@ fun CourseGlassCard(
         requestedScale = backdropSampleScale,
         hasSupportedSampledShape = sampledShape != null
     )
-    val usesSampledBackdrop = renderSurface && useGlass && activeBackdropSampleScale < 0.999f
-    val activeSampledShape = sampledShape ?: shape
-    val sampledEffectFrame = liquidEffectFrame.sampledBackdropOnly(activeBackdropSampleScale)
-    val decorationEffectFrame = liquidEffectFrame.decorationOnly()
+    val sharedWallpaper = com.xiaomanjun.sleepdownschedule.glass.LocalSharedCourseBackdrop.current
+    val requiredBlurPx = with(androidx.compose.ui.platform.LocalDensity.current) { (liquidEffectFrame.blur ?: 0.dp).toPx() }
+    val useSharedWallpaper = sharedWallpaper != null && sharedWallpaper.ready &&
+        sharedWallpaper.source === glassBackdrop && sharedWallpaper.radiusPx == requiredBlurPx &&
+        sharedWallpaper.vibrant == liquidEffectFrame.useVibrancy && morphAllocation == null
+    val sampledSource = if (useSharedWallpaper) sharedWallpaper!! else glassBackdrop
+    // Course highlights use a fixed cached vector instead of the Kyant directional shader.
+    val cardEffects = if (useSharedWallpaper) {
+        liquidEffectFrame.copy(blur = null, useVibrancy = false, highlight = null)
+    } else liquidEffectFrame.copy(highlight = null)
+    val decorationEffectFrame = liquidEffectFrame.decorationOnly().copy(highlight = null)
+    val presetHighlight = Modifier.presetCourseCardHighlight(
+        shape = shape,
+        alpha = liquidEffectFrame.highlight?.alpha ?: 0f,
+        enabled = { drawMaterialNodes },
+        bounds = { morphAllocation?.localBounds() }
+    )
     val liquidSurfaceDraw: DrawScope.() -> Unit = {
         val liveAlpha = previewState?.cardAlpha ?: config.cardAlpha
         val brightnessAttenuation = courseCardBrightnessAttenuation(
@@ -1106,35 +1150,26 @@ fun CourseGlassCard(
                     }
             )
         }
-        val separateDecoration = mountMaterialNodes && useGlass && (!renderSurface || usesSampledBackdrop)
+        val separateDecoration = mountMaterialNodes && useGlass && !renderSurface
         val surfaceModifier = if (!mountMaterialNodes || !renderSurface) {
             Modifier
-        } else if (usesSampledBackdrop) {
-            Modifier
-                .fillMaxSize(activeBackdropSampleScale)
-                .sleepDownGlassSurface(
-                    backdrop = glassBackdrop,
-                    descriptor = liquidDescriptor,
-                    material = tokens,
-                    shape = { activeSampledShape },
-                    effectFrame = sampledEffectFrame,
-                    additionalLayerBlock = {
-                        transformOrigin = TransformOrigin(0f, 0f)
-                        scaleX = 1f / activeBackdropSampleScale
-                        scaleY = 1f / activeBackdropSampleScale
-                    }
-                )
         } else if (useGlass) {
             Modifier
                 .matchParentSize()
                 .sleepDownGlassSurface(
-                        backdrop = glassBackdrop,
+                        backdrop = requireNotNull(sampledSource),
                         descriptor = liquidDescriptor,
                         material = tokens,
                         shape = { shape },
-                        effectFrame = liquidEffectFrame,
+                        effectFrame = cardEffects,
+                        backdropSampleScale = if (morphAllocation == null) activeBackdropSampleScale else 1f,
+                        cacheDecorations = morphAllocation == null,
+                        renderEnabled = { drawMaterialNodes },
+                        renderBounds = { morphAllocation?.localBounds() },
+                        allocationPaddingPx = morphAllocation?.paddingPx,
                         onDrawSurface = liquidSurfaceDraw
                 )
+                .then(presetHighlight)
         } else if (simpleBlurBackdrop != null) {
             // Non-liquid mode still samples the content behind the course card, but
             // deliberately omits lens/refraction/vibrancy.  This is a cheap Gaussian
@@ -1145,6 +1180,7 @@ fun CourseGlassCard(
                     backdrop = simpleBlurBackdrop,
                     descriptor = simpleDescriptor,
                     material = simpleMaterial,
+                    renderEnabled = { drawMaterialNodes },
                     shape = { shape },
                     effectFrame = GlassEffectFrame(
                         blur = simpleBlurValue.dp,
@@ -1209,11 +1245,13 @@ fun CourseGlassCard(
                         material = tokens,
                         shape = { shape },
                         effectFrame = decorationEffectFrame,
-                        sceneState = null,
+                        cacheDecorations = true,
+                        renderEnabled = { drawMaterialNodes },
+                        sampleBackdrop = false,
                         effectsOverride = {},
-                        onDrawBackdrop = { _ -> },
                         onDrawSurface = liquidSurfaceDraw
                     )
+                    .then(presetHighlight)
             )
         }
         // Full-resolution additive inner light, independent of the sampled blur/lens. The base
@@ -1229,6 +1267,7 @@ fun CourseGlassCard(
                         outlineLightEnabled = true
                     ),
                 expanded = expandedOutlineLight,
+                morphAllocation = morphAllocation,
                 modifier = Modifier
                     .matchParentSize()
                     .then(materialAlphaModifier)
