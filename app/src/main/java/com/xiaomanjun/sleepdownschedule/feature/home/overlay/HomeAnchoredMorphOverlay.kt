@@ -1,4 +1,8 @@
 package com.xiaomanjun.sleepdownschedule.feature.home.overlay
+
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.unit.Dp
 import com.xiaomanjun.sleepdownschedule.glass.GlassMorphAllocation
 import com.xiaomanjun.sleepdownschedule.glass.GlassMotionExperiments
 import com.xiaomanjun.sleepdownschedule.glass.glassMorphHost
@@ -2449,18 +2453,20 @@ internal fun HomeAddMenuMorphPanel(
     externalHighlightedIndex: Int = -1,
     interactive: Boolean,
     shape: Shape,
-    modifier: Modifier
+    modifier: Modifier,
+    showModeSwitch: Boolean = true,
+    actionItemHeight: Dp = HomeAddMenuActionItemHeightDp.dp
 ) {
     var highlightedIndex by remember { mutableIntStateOf(-1) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val haptic = LocalHapticFeedback.current
     val itemStepPx = with(density) {
-        (HomeAddMenuActionItemHeightDp + HomeAddMenuActionGapDp).dp.toPx()
+        (actionItemHeight + HomeAddMenuActionGapDp.dp).toPx()
     }
     val contentTopPaddingPx = with(density) { HomeAddMenuContentTopPaddingDp.dp.toPx() }
-    val modeHeightPx = with(density) { HomeAddMenuModeHeightDp.dp.toPx() }
+    val modeHeightPx = with(density) { if (showModeSwitch) HomeAddMenuModeHeightDp.dp.toPx() else 0f }
     val actionTopPx = with(density) {
-        (
+        if (!showModeSwitch) 0f else (
             HomeAddMenuModeHeightDp + HomeAddMenuSectionGapDp * 2f +
                 HomeAddMenuDividerHeightDp
             ).dp.toPx()
@@ -2485,13 +2491,14 @@ internal fun HomeAddMenuMorphPanel(
     }
 
     val unifiedMenuGestureModifier = if (interactive) {
-        Modifier.pointerInput(actions, homeMode) {
+        Modifier.pointerInput(actions, homeMode, showModeSwitch, actionItemHeight) {
             awaitEachGesture {
                 val down = awaitFirstDown(
                     requireUnconsumed = false,
                     pass = PointerEventPass.Initial
                 )
                 highlightedIndex = hitIndex(down.position.y)
+                if (!showModeSwitch) down.consume()
                 var lastPosition = down.position
                 var completedNormally = false
                 try {
@@ -2500,11 +2507,14 @@ internal fun HomeAddMenuMorphPanel(
                         val change = event.changes.firstOrNull { it.id == down.id }
                             ?: break
                         lastPosition = change.position
+                        if (!showModeSwitch) change.consume()
                         if (!change.pressed) {
                             completedNormally = change.changedToUpIgnoreConsumed()
                             break
                         }
-                        val nextIndex = hitIndex(change.position.y)
+                        val nextIndex = if (!showModeSwitch && change.position.x !in 0f..size.width.toFloat()) {
+                            -1
+                        } else hitIndex(change.position.y)
                         if (nextIndex != highlightedIndex) {
                             highlightedIndex = nextIndex
                             if (nextIndex in actions.indices) {
@@ -2513,11 +2523,13 @@ internal fun HomeAddMenuMorphPanel(
                         }
                     }
                 } finally {
-                    val index = highlightedIndex
+                    val index = if (!showModeSwitch) {
+                        if (lastPosition.x in 0f..size.width.toFloat()) hitIndex(lastPosition.y) else -1
+                    } else highlightedIndex
                     highlightedIndex = -1
                     if (completedNormally) {
                         val innerY = lastPosition.y - contentTopPaddingPx
-                        if (innerY in 0f..modeHeightPx) {
+                        if (showModeSwitch && innerY in 0f..modeHeightPx) {
                             val targetMode = HomeMode.entries[
                                 ((lastPosition.x / size.width) * HomeMode.entries.size)
                                     .toInt()
@@ -2597,25 +2609,27 @@ internal fun HomeAddMenuMorphPanel(
                 .then(unifiedMenuGestureModifier)
         ) {
             CompositionLocalProvider(LocalContentColor provides textColor) {
-                Row(
-                    modifier = Modifier
-                        .width(150.dp)
-                        .align(Alignment.CenterHorizontally)
-                        .height(HomeAddMenuModeHeightDp.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    ModeTile(HomeMode.Day, R.drawable.ic_day_view, "日视图")
-                    ModeTile(HomeMode.Week, R.drawable.ic_week_view, "周视图")
+                if (showModeSwitch) {
+                    Row(
+                        modifier = Modifier
+                            .width(150.dp)
+                            .align(Alignment.CenterHorizontally)
+                            .height(HomeAddMenuModeHeightDp.dp),
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        ModeTile(HomeMode.Day, R.drawable.ic_day_view, "日视图")
+                        ModeTile(HomeMode.Week, R.drawable.ic_week_view, "周视图")
+                    }
+                    Spacer(Modifier.height(HomeAddMenuSectionGapDp.dp))
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp)
+                            .height(HomeAddMenuDividerHeightDp.dp)
+                            .background(textColor.copy(alpha = 0.14f))
+                    )
+                    Spacer(Modifier.height(HomeAddMenuSectionGapDp.dp))
                 }
-                Spacer(Modifier.height(HomeAddMenuSectionGapDp.dp))
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .height(HomeAddMenuDividerHeightDp.dp)
-                        .background(textColor.copy(alpha = 0.14f))
-                )
-                Spacer(Modifier.height(HomeAddMenuSectionGapDp.dp))
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -2626,7 +2640,13 @@ internal fun HomeAddMenuMorphPanel(
                         AddMenuLiquidItem(
                             config = config,
                             action = action,
-                            itemHeight = HomeAddMenuActionItemHeightDp.dp,
+                            itemHeight = actionItemHeight,
+                            modifier = if (!showModeSwitch) Modifier.semantics(mergeDescendants = true) {
+                                onClick(action.label) {
+                                    if (interactive) action.onClick()
+                                    interactive
+                                }
+                            } else Modifier,
                             highlighted = externalHighlightedIndex == index ||
                                 highlightedIndex == index
                         )

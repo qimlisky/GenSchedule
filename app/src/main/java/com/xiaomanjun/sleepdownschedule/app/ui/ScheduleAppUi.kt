@@ -582,7 +582,8 @@ sealed interface HomeDialog {
     data object EduImport : HomeDialog
     data class ConfirmImport(val draft: ImportDraft, val returnDialog: HomeDialog? = ImportSchedule) : HomeDialog
     data class EditWallpaper(val uri: Uri, val entrySnapshot: Bitmap?) : HomeDialog
-    data class EditCourse(val course: CourseEntity?, val targetWeek: Int? = null) : HomeDialog
+    data class EditCourse(val course: CourseEntity?, val targetWeek: Int? = null,
+        val copyDraft: CourseEntity? = null) : HomeDialog
     data class ApplyCourseEdit(val original: CourseEntity, val edited: CourseEntity, val targetWeek: Int) : HomeDialog
     data class ConfirmCourseConflicts(
         val original: CourseEntity,
@@ -836,6 +837,7 @@ fun CourseScheduleAppUi(
         }
     }
     val homeAnchoredMorphState = rememberHomeAnchoredMorphState()
+    val courseShortcuts = remember(appScope) { CourseShortcutController(appScope) }
     val homeMenuDestinationMotionState = rememberHomeMenuDestinationMotionState()
     var homeMenuDestinationRequest by remember { mutableStateOf<HomeMenuDestinationRequest?>(null) }
     var homeMenuSourceHidden by remember { mutableStateOf(false) }
@@ -1670,6 +1672,11 @@ fun CourseScheduleAppUi(
             else -> legacyDepth
         }
     }
+    LaunchedEffect(screen, homeMode, visualState.config.id, homeDisplayWeek,
+        homeAdaptiveMetrics.screenWidth, homeAdaptiveMetrics.screenHeight,
+        homeAnchoredOverlayRequest, pickerState.overlayVisible) {
+        courseShortcuts.reset()
+    }
     LaunchedEffect(
         substantialOverlaySessionActive,
         screen,
@@ -2280,6 +2287,7 @@ fun CourseScheduleAppUi(
     val useSharedCourseBackdrop = screen is Screen.Home && visualState.config.courseCardGlassEnabled &&
         wallpaperImages.source != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     CompositionLocalProvider(
+        LocalCourseShortcuts provides courseShortcuts,
         com.xiaomanjun.sleepdownschedule.glass.LocalSharedCourseBackdrop provides
             sharedCourseBackdrop.takeIf { useSharedCourseBackdrop },
         LocalSharedTransitionScope provides activeSharedTransitionScope,
@@ -2304,9 +2312,20 @@ fun CourseScheduleAppUi(
         modifier = Modifier.fillMaxSize(),
         underlayModifier = Modifier
             .fillMaxSize()
-            .centeredDialogSceneProducer(centeredDialogSceneBackdrop),
+            .then(if (courseShortcuts.request != null) {
+                Modifier.glassBackdropProducer(centeredDialogSceneBackdrop)
+            } else {
+                Modifier.centeredDialogSceneProducer(centeredDialogSceneBackdrop)
+            }),
         popupHost = {
             Box(Modifier.fillMaxSize()) {
+                CourseShortcutOverlay(
+                    controller = courseShortcuts,
+                    config = visualState.config,
+                    backdrop = centeredDialogSceneBackdrop,
+                    cardBackdrop = backgroundBackdrop,
+                    onCopy = { draft -> homeDialog = HomeDialog.EditCourse(null, copyDraft = draft) }
+                )
                 // Overlay content is subcomposed by the host, not at its call site. Preserve the
                 // same Miuix/Glass CompositionLocals that wrapped the 1.1.5 host; otherwise sheet
                 // rows fall back to the taller non-Miuix implementation and their dividers become
@@ -2465,9 +2484,9 @@ fun CourseScheduleAppUi(
                 .background(MaterialTheme.colorScheme.background)
         ) {
         HomeBackgroundBlurLayer(
-            blurProgress = homeOverlayBackgroundBlurProgress,
+            blurProgress = { maxOf(homeOverlayBackgroundBlurProgress(), courseShortcuts.progress.value) },
             useFrozenHomeScene = useFrozenHomeMorphBlur,
-            closing = { homeBackgroundBlurClosing },
+            closing = { homeBackgroundBlurClosing || courseShortcuts.closing },
             sceneKey = homeCaptureFrameKey,
             modifier = Modifier.fillMaxSize()
         ) {
@@ -4162,7 +4181,12 @@ fun CourseScheduleAppUi(
                             NormalizedCourseEditorScreen(
                                 state = state,
                                 initialCourse = dialog.course,
+                                copyDraft = dialog.copyDraft,
                                 onCancel = { dismissHomeDialog() },
+                                onSaveCourses = if (dialog.copyDraft != null) { courses ->
+                                    viewModel.addCourses(courses.map { it.copy(id = 0, scheduleId = dialog.copyDraft.scheduleId) })
+                                    dismissHomeDialog()
+                                } else null,
                                 onSave = {
                                     if (dialog.course == null) {
                                         viewModel.addCourse(it)
@@ -5251,14 +5275,15 @@ fun AddMenuLiquidItem(
     config: ScheduleConfigEntity,
     action: AddMenuAction,
     itemHeight: Dp,
-    highlighted: Boolean
+    highlighted: Boolean,
+    modifier: Modifier = Modifier
 ) {
     val baseText = glassForegroundColor(config)
     val selectedColor = ComposeColor(0xFF8E8E93).copy(
         alpha = if (glassUsesLightStyle(config)) 0.20f else 0.28f
     )
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(itemHeight),
         contentAlignment = Alignment.Center

@@ -8,6 +8,14 @@ import com.xiaomanjun.sleepdownschedule.glass.ui.*
 import com.xiaomanjun.sleepdownschedule.*
 import com.xiaomanjun.sleepdownschedule.feature.home.*
 import com.xiaomanjun.sleepdownschedule.feature.home.day.*
+import com.xiaomanjun.sleepdownschedule.feature.home.overlay.*
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
 
 import com.xiaomanjun.sleepdownschedule.core.performance.*
 import com.xiaomanjun.sleepdownschedule.core.ui.text.AutoFitSingleLineText
@@ -1082,7 +1090,7 @@ private fun WeekEditOverlayHost(
 }
 
 @Composable
-private fun WeekCourseOverlayCardContent(course: CourseEntity, config: ScheduleConfigEntity) {
+internal fun WeekCourseOverlayCardContent(course: CourseEntity, config: ScheduleConfigEntity) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val heightDp = maxHeight.value
@@ -3025,47 +3033,80 @@ fun WeekCourseBlock(
             conflictCardFlight.snapTo(0f)
         }
     }
-    val bodyGestureModifier = Modifier.pointerInput(editMode, customTimeLocked, course.id, editWeek, currentSpan) {
-        if (editMode && !customTimeLocked) {
+    val shortcuts = LocalCourseShortcuts.current
+    val currentEditMode by rememberUpdatedState(editMode)
+    val openShortcut by rememberUpdatedState<() -> Unit> {
+        ownBoundsRef[0]?.let { bounds ->
+            shortcuts?.open(CourseShortcutRequest(course, editWeek, bounds,
+                with(density) { cardCorner.toPx() }, onEnterEditMode))
+        }
+    }
+    val startBodyDrag by rememberUpdatedState<(Offset) -> Boolean> { position ->
+        val request = buildWeekEditOverlayRequest(WeekEditOverlayMode.Move, position)
+        if (request != null && !customTimeLocked) {
+            shortcuts?.takeOverDrag()
+            onEnterEditMode()
+            bodyDragging = true
+            onStartWeekEditOverlay(request)
+            true
+        } else false
+    }
+    val dragBody by rememberUpdatedState(onDragWeekEditOverlay)
+    val finishBodyDrag by rememberUpdatedState(onFinishMoveOverlay)
+    val cancelBodyDrag by rememberUpdatedState(onCancelWeekEditOverlay)
+    val clickBody by rememberUpdatedState<() -> Unit> { onCourseClick(course, ownBoundsRef[0]) }
+    // Editing is read through updated state, never a pointerInput key: switching into edit
+    // mode must not cancel the finger that is about to move the course.
+    val bodyGestureModifier = Modifier.pointerInput(customTimeLocked, course.id, editWeek, currentSpan) {
+        awaitEachGesture {
+            val down = awaitFirstDown()
+            down.consume()
+            val longPress = awaitLongPressOrCancellation(down.id)
+            if (longPress == null) {
+                val up = currentEvent.changes.firstOrNull { it.id == down.id }
+                if (up != null && up.changedToUpIgnoreConsumed() && !up.isConsumed) {
+                    up.consume()
+                    if (!currentEditMode || customTimeLocked) clickBody()
+                }
+                return@awaitEachGesture
+            }
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            if (!currentEditMode) openShortcut()
             val velocityTracker = VelocityTracker()
-            detectDragGesturesAfterLongPress(
-                onDragStart = { startPosition ->
-                    velocityTracker.resetTracking()
-                    buildWeekEditOverlayRequest(WeekEditOverlayMode.Move, startPosition)?.let { request ->
-                        bodyDragging = true
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onStartWeekEditOverlay(request)
-                    }
-                },
-                onDrag = { change, dragAmount ->
-                    if (bodyDragging) {
+            velocityTracker.addPosition(longPress.uptimeMillis, longPress.position)
+            var accumulated = Offset.Zero
+            var dragging = currentEditMode && !customTimeLocked && startBodyDrag(longPress.position)
+            var released = false
+            try {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == longPress.id } ?: break
+                    if (event.changes.any { it.id != longPress.id && it.pressed } || change.isConsumed) break
+                    if (!change.pressed) {
+                        released = change.changedToUpIgnoreConsumed()
                         change.consume()
-                        velocityTracker.addPosition(change.uptimeMillis, change.position)
-                        onDragWeekEditOverlay(dragAmount)
+                        break
                     }
-                },
-                onDragEnd = {
-                    if (bodyDragging) {
-                        onFinishMoveOverlay(velocityTracker.calculateVelocity())
-                        bodyDragging = false
+                    val delta = change.positionChange()
+                    accumulated += delta
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                    change.consume()
+                    if (!dragging && !customTimeLocked && accumulated.getDistance() > viewConfiguration.touchSlop) {
+                        dragging = startBodyDrag(longPress.position)
+                        if (dragging) dragBody(accumulated)
+                    } else if (dragging) {
+                        dragBody(delta)
+                    }
+                }
+            } finally {
+                if (dragging) {
+                    bodyDragging = false
+                    if (released) {
+                        finishBodyDrag(velocityTracker.calculateVelocity())
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    }
-                },
-                onDragCancel = {
-                    if (bodyDragging) {
-                        bodyDragging = false
-                        onCancelWeekEditOverlay()
-                    }
-                }
-            )
-        } else {
-            detectTapGestures(
-                onTap = { onCourseClick(course, ownBoundsRef[0]) },
-                onLongPress = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    if (!editMode) onEnterEditMode()
-                }
-            )
+                    } else cancelBodyDrag()
+                } else if (!released) shortcuts?.close()
+            }
         }
     }
     val editingId = LocalEditingCourseId.current
@@ -3150,6 +3191,15 @@ fun WeekCourseBlock(
                 .then(startupModifier)
                 .then(tailModifier)
                 .then(bodyGestureModifier)
+                .semantics {
+                    onClick("查看课程") { clickBody(); true }
+                    onLongClick("课程快捷操作") { openShortcut(); true }
+                }
+                .graphicsLayer {
+                    val shortcut = shortcuts?.request
+                    alpha = if (shortcut?.course?.id == course.id && shortcut.week == editWeek &&
+                        shortcut.bounds == ownBoundsRef[0]) 0f else 1f
+                }
                 .zIndex(if (liftedVisualActive) 3f else 0f)
         ) {
             conflictUnderlyingCourse

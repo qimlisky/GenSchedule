@@ -348,7 +348,8 @@ fun NormalizedCourseEditorScreen(
     onSaveCourses: ((List<CourseEntity>) -> Unit)? = null,
     onDelete: (CourseEntity) -> Unit,
     backdrop: Backdrop?,
-    pickerRenderInRootScaffold: Boolean = true
+    pickerRenderInRootScaffold: Boolean = true,
+    copyDraft: CourseEntity? = null
 ) {
     val formData = remember(state.config, state.periods, state.courses) {
         CourseEditorFormData(
@@ -365,7 +366,8 @@ fun NormalizedCourseEditorScreen(
         onSaveCourses = onSaveCourses,
         onDelete = onDelete,
         backdrop = backdrop,
-        pickerRenderInRootScaffold = pickerRenderInRootScaffold
+        pickerRenderInRootScaffold = pickerRenderInRootScaffold,
+        copyDraft = copyDraft
     )
 }
 
@@ -383,7 +385,7 @@ data class CourseEditorPagerPresentation(
     val visible: Boolean
 )
 
-private data class CourseEditorDraft(
+internal data class CourseEditorDraft(
     val name: String,
     val teacher: String,
     val location: String,
@@ -634,6 +636,14 @@ private fun courseEditorDraft(
     )
 }
 
+internal fun courseEditorCopyDraft(
+    source: CourseEntity,
+    periodValues: List<Int>,
+    totalWeeks: Int
+): CourseEditorDraft = courseEditorDraft(listOf(source), periodValues, totalWeeks)
+    .copy(weekdays = emptySet(), periodStart = 0, periodEnd = 0,
+        customStartTime = null, customEndTime = null)
+
 internal fun courseEditorOriginalForWeekday(
     originals: List<CourseEntity>,
     weekday: Int,
@@ -700,7 +710,8 @@ fun NormalizedCourseEditorScreen(
     pickerRenderInRootScaffold: Boolean = true,
     renderPagerIndicator: Boolean = true,
     onPagerPresentationChange: ((CourseEditorPagerPresentation) -> Unit)? = null,
-    rowEntrance: (Int) -> Float = { _ -> 1f }
+    rowEntrance: (Int) -> Float = { _ -> 1f },
+    copyDraft: CourseEntity? = null
 ) {
     val config = formData.config
     val editorGroups = remember(initialCourse, formData.courses) {
@@ -715,9 +726,13 @@ fun NormalizedCourseEditorScreen(
         editorGroups.indexOfFirst { group -> group.courses.any { it.id == initialCourse?.id } }.coerceAtLeast(0)
     }
     val pagerState = rememberPagerState(initialPage = initialPage) { editorGroups.size }
-    var drafts by remember(editorGroups, periodValues, config.totalWeeks) {
+    var drafts by remember(editorGroups, periodValues, config.totalWeeks, copyDraft) {
         mutableStateOf(editorGroups.mapIndexed { index, group ->
-            index to courseEditorDraft(group.courses, periodValues, config.totalWeeks.coerceAtLeast(1))
+            index to if (copyDraft != null && initialCourse == null) {
+                // A copy is a new draft, never a member of the source course's edit group.
+                // Keep its content and selected weeks, but require a fresh time selection.
+                courseEditorCopyDraft(copyDraft, periodValues, config.totalWeeks.coerceAtLeast(1))
+            } else courseEditorDraft(group.courses, periodValues, config.totalWeeks.coerceAtLeast(1))
         }.toMap())
     }
     var error by remember { mutableStateOf<String?>(null) }
@@ -958,7 +973,7 @@ private fun CourseEditorFormPage(
             values = (1..7).toList(),
             selected = draft.weekdays,
             displayValue = draft.weekdays.sorted()
-                .joinToString("、") { "周${weekdayLabel(it)}" },
+                .joinToString("、") { "周${weekdayLabel(it)}" }.ifEmpty { "请选择星期" },
             preferredColumns = 7,
             onSelected = { onDraftChange(draft.copy(weekdays = it)) },
             onOpenPicker = onOpenPicker,
@@ -1210,7 +1225,8 @@ private fun DialogPeriodSelector(
     CourseEditorPickerValue(
         title = title,
         value = customRange?.let { (customStart, customEnd) -> "$customStart - $customEnd" }
-            ?: "${label(safeValues[startIndex])} - ${label(safeValues[endIndex])}",
+            ?: if (start !in safeValues || end !in safeValues) "请选择时间"
+            else "${label(safeValues[startIndex])} - ${label(safeValues[endIndex])}",
         backdrop = backdrop,
         config = config,
         onClick = {
