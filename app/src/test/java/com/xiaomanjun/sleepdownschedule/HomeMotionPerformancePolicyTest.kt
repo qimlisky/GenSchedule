@@ -1,4 +1,8 @@
 package com.xiaomanjun.sleepdownschedule
+import com.xiaomanjun.sleepdownschedule.app.ui.*
+import com.xiaomanjun.sleepdownschedule.feature.home.*
+import com.xiaomanjun.sleepdownschedule.feature.home.overlay.*
+import com.xiaomanjun.sleepdownschedule.feature.course.editor.*
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -203,13 +207,13 @@ class HomeMotionPerformancePolicyTest {
     }
 
     @Test
-    fun courseEditorWaitsForTwoRecordedTargetFrames() {
+    fun courseEditorWaitsForOneRecordedShellFrame() {
         assertFalse(
             courseEditorContentReadyForMotion(
                 rootWidth = 1080,
                 rootHeight = 2400,
                 contentLaidOut = true,
-                recordedFrameCount = 1
+                recordedFrameCount = 0
             )
         )
         assertTrue(
@@ -217,7 +221,7 @@ class HomeMotionPerformancePolicyTest {
                 rootWidth = 1080,
                 rootHeight = 2400,
                 contentLaidOut = true,
-                recordedFrameCount = 2
+                recordedFrameCount = 1
             )
         )
     }

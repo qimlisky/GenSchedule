@@ -347,6 +347,7 @@ data class BackupPreferences(
 @Serializable
 data class BackupAppIconPreferences(
     val mode: String,
+    val style: String = "KANBAN",
     val followsSystemDarkMode: Boolean,
     val darkTheme: Boolean
 )

@@ -24,7 +24,8 @@ internal data class LiveUpdateStatus(
     val statusText: String,
     val detailText: String,
     val minutesToTransition: Int,
-    val nextTransitionAtMillis: Long?
+    val nextTransitionAtMillis: Long?,
+    val progressPercent: Int? = null
 )
 
 internal data class LiveUpdatePayload(
@@ -116,7 +117,12 @@ internal data class LiveUpdatePayload(
                     statusText = "上课中",
                     detailText = "$target · 还有${minutes}分钟",
                     minutesToTransition = minutes,
-                    nextTransitionAtMillis = transition
+                    nextTransitionAtMillis = transition,
+                    progressPercent = elapsedPercent(
+                        nowMillis,
+                        if (breakStatusEnabled) segment.startAtMillis else first.startAtMillis,
+                        transition
+                    )
                 )
             }
             val nextSegment = timeline.getOrNull(index + 1)
@@ -128,7 +134,8 @@ internal data class LiveUpdatePayload(
                         statusText = "课程进行中",
                         detailText = "${formatTime(last.endAtMillis)}下课 · 还有${minutes}分钟",
                         minutesToTransition = minutes,
-                        nextTransitionAtMillis = last.endAtMillis
+                        nextTransitionAtMillis = last.endAtMillis,
+                        progressPercent = elapsedPercent(nowMillis, first.startAtMillis, last.endAtMillis)
                     )
                 }
                 val minutes = minutesUntil(nowMillis, nextSegment.startAtMillis)
@@ -137,7 +144,8 @@ internal data class LiveUpdatePayload(
                     statusText = "课间中",
                     detailText = "${formatTime(nextSegment.startAtMillis)}上课 · 还有${minutes}分钟",
                     minutesToTransition = minutes,
-                    nextTransitionAtMillis = nextSegment.startAtMillis
+                    nextTransitionAtMillis = nextSegment.startAtMillis,
+                    progressPercent = elapsedPercent(nowMillis, segment.endAtMillis, nextSegment.startAtMillis)
                 )
             }
         }
@@ -156,6 +164,11 @@ internal data class LiveUpdatePayload(
 
 private fun minutesUntil(nowMillis: Long, targetMillis: Long): Int =
     ceil((targetMillis - nowMillis).coerceAtLeast(0L) / 60_000.0).toInt()
+
+private fun elapsedPercent(nowMillis: Long, startMillis: Long, endMillis: Long): Int {
+    val duration = endMillis - startMillis
+    return ((nowMillis - startMillis).coerceIn(0L, duration) * 100L / duration).toInt()
+}
 
 private fun formatTime(epochMillis: Long): String =
     localTimeAt(epochMillis).format(DateTimeFormatter.ofPattern("HH:mm"))

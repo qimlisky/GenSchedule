@@ -6,6 +6,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.State
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.Shape
@@ -36,6 +39,10 @@ private val DefaultLayerBackdropDraw: ContentDrawScope.() -> Unit = { drawConten
 private val DefaultGlassBackdropDraw: DrawScope.(DrawScope.() -> Unit) -> Unit = { drawBackdrop ->
     drawBackdrop()
 }
+
+/** Equal output suppresses invalidation, while the derived state tracks the latest callback's reads. */
+internal fun derivedGlassShape(shape: State<() -> Shape>): State<Shape> =
+    derivedStateOf(structuralEqualityPolicy()) { shape.value.invoke() }
 
 private data class GlassEffectStructure(
     val usesOverride: Boolean,
@@ -113,7 +120,8 @@ fun rememberGlassCombinedBackdrop(
     second: Backdrop
 ): Backdrop = rememberCombinedBackdrop(first, second)
 
-fun Modifier.glassBackdropProducer(backdrop: LayerBackdrop): Modifier = layerBackdrop(backdrop)
+fun Modifier.glassBackdropProducer(backdrop: LayerBackdrop, recordKey: (() -> Any?)? = null): Modifier =
+    layerBackdrop(backdrop, recordKey)
 
 /**
  * The single KyantReference consumption path. It preserves the official effect order while
@@ -137,7 +145,14 @@ fun Modifier.sleepDownGlassSurface(
     onDrawBackdrop: (DrawScope.(DrawScope.() -> Unit) -> Unit)? = null,
     onDrawSurface: (DrawScope.() -> Unit)? = null,
     onDrawFront: (DrawScope.() -> Unit)? = null,
-    clipToBounds: Boolean = false
+    clipToBounds: Boolean = false,
+    sampleBackdrop: Boolean = true,
+    renderEnabled: () -> Boolean = { true },
+    renderBounds: () -> androidx.compose.ui.geometry.Rect? = { null },
+    allocationPaddingPx: Float? = null,
+    effectInputKey: Any? = null,
+    cacheDecorations: Boolean = false,
+    backdropSampleScale: Float = 1f
 ): Modifier {
     if (sceneState?.diagnosticsEnabled == true) {
         check(descriptor.materialRole == material.role) {
@@ -146,7 +161,9 @@ fun Modifier.sleepDownGlassSurface(
     }
 
     val currentShape = rememberUpdatedState(shape)
+    val resolvedShape = remember { derivedGlassShape(currentShape) }
     val currentFrame = rememberUpdatedState(effectFrame)
+    val currentMaterialFrame = rememberUpdatedState(effectFrame.materialEffectsOnly())
     val currentEffectsOverride = rememberUpdatedState(effectsOverride)
     val currentHighlightOverride = rememberUpdatedState(highlightOverride)
     val currentShadowOverride = rememberUpdatedState(shadowOverride)
@@ -157,16 +174,31 @@ fun Modifier.sleepDownGlassSurface(
     val currentOnDrawSurface = rememberUpdatedState(onDrawSurface)
     val currentOnDrawFront = rememberUpdatedState(onDrawFront)
     val currentClipToBounds = rememberUpdatedState(clipToBounds)
+    val currentRenderEnabled = rememberUpdatedState(renderEnabled)
+    val currentRenderBounds = rememberUpdatedState(renderBounds)
+    // Only an explicit complete key may bypass evaluation; custom shapes/effects can read state.
+    val currentEffectInputKey = rememberUpdatedState(effectInputKey)
+    val renderOptions = remember(sampleBackdrop, allocationPaddingPx, cacheDecorations, backdropSampleScale) {
+        com.kyant.backdrop.BackdropRenderOptions(
+            enabled = { currentRenderEnabled.value.invoke() },
+            sampleBackdrop = sampleBackdrop,
+            bounds = { currentRenderBounds.value.invoke() },
+            allocationPadding = allocationPaddingPx,
+            effectKey = { currentEffectInputKey.value },
+            cacheDecorations = cacheDecorations,
+            sampleScale = backdropSampleScale
+        )
+    }
     val diagnosticSceneState = sceneState?.takeIf { it.diagnosticsEnabled }
 
-    val stableShape: () -> Shape = remember { { currentShape.value.invoke() } }
+    val stableShape: () -> Shape = remember { { resolvedShape.value } }
     val stableEffects: BackdropEffectScope.() -> Unit = remember(diagnosticSceneState, descriptor) {
         val applyEffects: BackdropEffectScope.() -> Unit = {
             val override = currentEffectsOverride.value
             if (override != null) {
                 override.invoke(this)
             } else {
-                val frame = currentFrame.value
+                val frame = currentMaterialFrame.value
                 if (frame.useVibrancy) vibrancy()
                 frame.blur?.let { blur(it.toPx()) }
                 val lensHeight = frame.lensHeight
@@ -280,8 +312,13 @@ fun Modifier.sleepDownGlassSurface(
     val stableOnDrawBehind: (DrawScope.() -> Unit)? = remember(onDrawBehind != null) {
         if (onDrawBehind == null) null else ({ currentOnDrawBehind.value?.invoke(this) })
     }
-    val stableOnDrawSurface: (DrawScope.() -> Unit)? = remember(onDrawSurface != null) {
-        if (onDrawSurface == null) null else ({ currentOnDrawSurface.value?.invoke(this) })
+    val stableOnDrawSurface: (DrawScope.() -> Unit)? = remember(onDrawSurface != null, sampleBackdrop, diagnosticSceneState, descriptor) {
+        if (onDrawSurface == null && (sampleBackdrop || diagnosticSceneState == null)) null else ({
+            if (!sampleBackdrop) diagnosticSceneState?.recordConsumerDraw(
+                descriptor, IntSize(ceil(size.width).toInt(), ceil(size.height).toInt())
+            )
+            currentOnDrawSurface.value?.invoke(this)
+        })
     }
     val stableOnDrawFront: (DrawScope.() -> Unit)? = remember(onDrawFront != null) {
         if (onDrawFront == null) null else ({ currentOnDrawFront.value?.invoke(this) })
@@ -321,7 +358,8 @@ fun Modifier.sleepDownGlassSurface(
         onDrawBehind = stableOnDrawBehind,
         onDrawBackdrop = stableOnDrawBackdrop,
         onDrawSurface = stableOnDrawSurface,
-        onDrawFront = stableOnDrawFront
+        onDrawFront = stableOnDrawFront,
+        renderOptions = renderOptions
     )
 }
 

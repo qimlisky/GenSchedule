@@ -699,7 +699,7 @@ object NotificationScheduler {
         )
         val builder = android.app.Notification.Builder(context, CHANNEL_ID)
         builder
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(com.xiaomanjun.sleepdownschedule.core.identity.currentIconResId(context))
             .setContentTitle(titleText)
             .setContentText(bodyText)
             .setStyle(android.app.Notification.BigTextStyle().bigText(expandedText))
@@ -717,7 +717,36 @@ object NotificationScheduler {
             .setOnlyAlertOnce(true)
             .setShowWhen(false)
             .setCategory(android.app.Notification.CATEGORY_EVENT)
-            .setColor(0xFF0A84FF.toInt())
+            .setColor(Notification.COLOR_DEFAULT)
+        status.progressPercent?.let { progress ->
+            val countdownLine = if (status.phase == LiveUpdatePhase.BREAK) {
+                "还有${status.minutesToTransition}分钟上课"
+            } else {
+                "还有${status.minutesToTransition}分钟下课"
+            }
+            // 倒计时单独放在第三行，第二行只保留目标时间与课程时间，
+            // 去掉 detailText 里的“还有X分钟”，避免文案重复。
+            val infoLine = "${status.detailText.substringBefore(" · 还有")} · ${payload.timeText}"
+            builder
+                .setCategory(Notification.CATEGORY_PROGRESS)
+                .setContentText("$infoLine\n$countdownLine")
+            if (Build.VERSION.SDK_INT >= 36) {
+                builder.setStyle(
+                    Notification.ProgressStyle()
+                        // 参照 llpower 的写法：用单个白色小圆点作为 tracker 图标，
+                        // 不再叠加 Point，避免进度条上出现两个重叠的进度图示。
+                        .setProgressTrackerIcon(
+                            Icon.createWithResource(context, R.drawable.ic_live_dot)
+                        )
+                        .setProgressSegments(listOf(
+                            Notification.ProgressStyle.Segment(100)
+                        ))
+                        .setProgress(progress)
+                )
+            } else {
+                builder.setStyle(null).setProgress(100, progress, false)
+            }
+        }
         if (payload.kind == LiveUpdateKind.TOMORROW) {
             builder
                 .addAction(android.app.Notification.Action.Builder(
@@ -731,7 +760,7 @@ object NotificationScheduler {
                         payload.muteUntil
                     )
                 ).build())
-        } else if (payload.showActions) {
+        } else if (payload.showActions && status.progressPercent == null) {
             val notificationManager = context.getSystemService(NotificationManager::class.java)
             val hasDndAccess = notificationManager?.isNotificationPolicyAccessGranted == true
             val dndEnabled = isDoNotDisturbEnabledByApp(context)
@@ -1015,6 +1044,19 @@ object NotificationScheduler {
                 Condition.SOURCE_USER_ACTION
             )
         )
+    }
+
+    fun refreshLiveUpdateIcon(context: Context) {
+        if (!canPostNotifications(context)) return
+        val manager = context.getSystemService(NotificationManager::class.java)
+        val active = manager.activeNotifications.firstOrNull { it.id == LIVE_UPDATE_ID } ?: return
+        val icon = com.xiaomanjun.sleepdownschedule.core.identity.currentIconResId(context)
+        if (active.notification.smallIcon?.resId == icon) return
+        val updated = android.app.Notification.Builder.recoverBuilder(context, active.notification)
+            .setSmallIcon(icon)
+            .setOnlyAlertOnce(true)
+            .build()
+        manager.notify(active.tag, active.id, updated)
     }
 
     private fun refreshVisibleLiveUpdate(context: Context) {

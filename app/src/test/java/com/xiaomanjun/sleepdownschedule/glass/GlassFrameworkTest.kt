@@ -8,13 +8,12 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.dp
 import com.xiaomanjun.sleepdownschedule.LiquidCourseCardBlurMax
-import com.xiaomanjun.sleepdownschedule.homeMenuDestinationTrajectoryGeometry
-import com.xiaomanjun.sleepdownschedule.homePersonalizationTrajectoryGeometry
-import com.xiaomanjun.sleepdownschedule.homeThreeDotMenuTrajectoryGeometry
-import com.xiaomanjun.sleepdownschedule.legacyCourseEditorMorphSpec
-import com.xiaomanjun.sleepdownschedule.legacyHomeMenuDestinationMorphSpec
-import com.xiaomanjun.sleepdownschedule.legacyPersonalizationMorphSpec
-import com.xiaomanjun.sleepdownschedule.legacyThreeDotMenuMorphSpec
+import com.xiaomanjun.sleepdownschedule.feature.home.overlay.homeMenuDestinationTrajectoryGeometry
+import com.xiaomanjun.sleepdownschedule.feature.home.overlay.homePersonalizationTrajectoryGeometry
+import com.xiaomanjun.sleepdownschedule.feature.home.overlay.homeThreeDotMenuTrajectoryGeometry
+import com.xiaomanjun.sleepdownschedule.transition.legacy.legacyHomeMenuDestinationMorphSpec
+import com.xiaomanjun.sleepdownschedule.transition.legacy.legacyPersonalizationMorphSpec
+import com.xiaomanjun.sleepdownschedule.transition.legacy.legacyThreeDotMenuMorphSpec
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -53,7 +52,7 @@ class GlassFrameworkTest {
         assertTrue(card.depthEffect)
         assertTrue(card.useVibrancy)
         assertFalse(GlassMaterialSpec.lens().depthEffect)
-        assertFalse(GlassMaterialSpec.popup(14.dp).depthEffect)
+        assertTrue(GlassMaterialSpec.popup(14.dp).depthEffect)
         assertFalse(GlassEffectFrame(blur = null).depthEffect)
     }
 
@@ -401,10 +400,10 @@ class GlassFrameworkTest {
                 .mountsGroup("current-centre")
         )
         assertTrue(
-            CourseGlassRestorePlan(CourseGlassOcclusionPhase.Revealing)
+            CourseGlassRestorePlan(CourseGlassOcclusionPhase.Revealing, setOf("current-centre"))
                 .mountsGroup("current-centre")
         )
-        assertEquals(200, CourseGlassMaterialRevealDurationMillis)
+        assertEquals(280, CourseGlassMaterialRevealDurationMillis)
         assertEquals(0.72f, courseGlassFlatFallbackAlpha(0.72f, 0f), 0.0001f)
         assertEquals(0.36f, courseGlassFlatFallbackAlpha(0.72f, 0.5f), 0.0001f)
         assertEquals(0f, courseGlassFlatFallbackAlpha(0.72f, 1f), 0.0001f)
@@ -466,7 +465,7 @@ class GlassFrameworkTest {
                 enabled = true,
                 currentlyMounted = true,
                 previousDistanceOutsidePx = null,
-                boundsInWindow = Rect(1_800f, 500f, 2_000f, 700f),
+                boundsInWindow = Rect(2_240f, 500f, 2_440f, 700f),
                 viewport = viewport,
                 prewarmDistancePx = prewarmDistance
             ).mountMaterial
@@ -507,7 +506,7 @@ class GlassFrameworkTest {
                 enabled = true,
                 currentlyMounted = true,
                 previousDistanceOutsidePx = null,
-                boundsInWindow = Rect(500f, 2_880f, 700f, 3_080f),
+                boundsInWindow = Rect(500f, 3_320f, 700f, 3_520f),
                 viewport = viewport,
                 prewarmDistancePx = prewarmDistance,
                 cullHorizontal = false

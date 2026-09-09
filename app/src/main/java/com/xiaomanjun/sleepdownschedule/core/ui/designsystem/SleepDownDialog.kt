@@ -520,18 +520,18 @@ private fun LiquidAlertActionButton(
     val contentColor = baseContentColor.copy(alpha = if (action.enabled) 1f else 0.38f)
     val dark = appUsesDarkTheme(config)
     val baseSurfaceColor = when (action.style) {
-        LiquidAlertActionStyle.Primary -> if (dark) Color(0xFF099AFF) else {
+        LiquidAlertActionStyle.Primary -> if (dark) Color(0xFF099AFF).copy(alpha = 0.82f) else {
             Color(0xFF0A84FF).copy(alpha = 0.90f)
         }
         LiquidAlertActionStyle.Secondary -> if (dark) {
-            Color(0xFF363639)
+            Color(0xFF363639).copy(alpha = 0.76f)
         } else {
             Color(0xFFD6D9DF).copy(alpha = 0.80f)
         }
         // Destructive actions share the same neutral glass as secondary actions. Their red label
         // is the only destructive accent, matching the reference alert behavior.
         LiquidAlertActionStyle.Destructive -> if (dark) {
-            Color(0xFF363639)
+            Color(0xFF363639).copy(alpha = 0.76f)
         } else {
             Color(0xFFD6D9DF).copy(alpha = 0.80f)
         }

@@ -118,12 +118,6 @@ schools:
     initial: "H"
     resource_folder: "HNVCC"
 
-  # SleepDown 新增：湖南邮电职业技术学院（湘邮教学管理平台，正方 V6 系教务）
-  - id: "HNPTC"
-    name: "湖南邮电职业技术学院"
-    initial: "H"
-    resource_folder: "HNPTC"
-
   - id: "IMUT"
     name: "内蒙古工业大学"
     initial: "N"
@@ -753,17 +747,5 @@ schools:
     name: "辽宁科技大学"
     initial: "L"
     resource_folder: "USTL"
-
-  # SleepDown 私有适配：上游官方索引不含这两所学校，恢复为本地 YAML 条目，
-  # 由 EduImport 在解析 v2 protobuf 后按缺失学校合并回列表。
-  - id: "SWU"
-    name: "西南大学"
-    initial: "X"
-    resource_folder: "SWU"
-
-  - id: "WUST"
-    name: "武汉科技大学"
-    initial: "W"
-    resource_folder: "WUST"
 
   

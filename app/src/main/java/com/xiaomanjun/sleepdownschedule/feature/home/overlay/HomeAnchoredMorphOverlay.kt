@@ -1,4 +1,8 @@
 package com.xiaomanjun.sleepdownschedule.feature.home.overlay
+import com.xiaomanjun.sleepdownschedule.glass.GlassMorphAllocation
+import com.xiaomanjun.sleepdownschedule.glass.GlassMotionExperiments
+import com.xiaomanjun.sleepdownschedule.glass.glassMorphHost
+import com.xiaomanjun.sleepdownschedule.glass.insetShapeFor
 
 import com.xiaomanjun.sleepdownschedule.app.ui.*
 import com.xiaomanjun.sleepdownschedule.glass.ui.*
@@ -1063,9 +1067,6 @@ internal fun HomeAnchoredMorphOverlayHost(
 ) {
     var renderedRequest by remember { mutableStateOf<HomeAnchoredOverlayRequest?>(null) }
     var panelContentPrepared by remember { mutableStateOf(false) }
-    val personalizeContentRecorded = remember {
-        java.util.concurrent.atomic.AtomicBoolean(false)
-    }
     var rootSize by remember { mutableStateOf(IntSize.Zero) }
     val latestOnDismissRequest by rememberUpdatedState(onDismissRequest)
     val latestOnAddMenuBoundsChanged by rememberUpdatedState(onAddMenuBoundsChanged)
@@ -1077,7 +1078,6 @@ internal fun HomeAnchoredMorphOverlayHost(
         if (request != null) {
             renderedRequest = request
             panelContentPrepared = request.kind != HomeAnchoredOverlayKind.Personalize
-            personalizeContentRecorded.set(false)
             motionState.renderedKind = request.kind
             motionState.phase = HomeAnchoredOverlayPhase.Preparing
             motionState.progress.snapTo(0f)
@@ -1087,24 +1087,7 @@ internal fun HomeAnchoredMorphOverlayHost(
                 withFrameNanos { }
                 waitedFrames++
             }
-            if (request.kind == HomeAnchoredOverlayKind.Personalize) {
-                // Give the week-view scene cache one complete preparation frame before mounting
-                // the slider tree. Recording both the full week grid and every personalization
-                // control in the same frame was the remaining first-open spike on dense schedules.
-                withFrameNanos { }
-                // Compose, measure and record the heavy slider tree before geometry starts moving.
-                // Wait for the draw callback instead of assuming that two display frames are enough
-                // on every device. This prevents Opening from racing the first GPU recording.
-                panelContentPrepared = true
-                var contentWaitFrames = 0
-                while (!personalizeContentRecorded.get() && contentWaitFrames < 8) {
-                    withFrameNanos { }
-                    contentWaitFrames++
-                }
-                // Keep one handoff frame after the layer is recorded so Kyant's backdrop consumer
-                // and the cached settings tree never enter the same moving frame.
-                withFrameNanos { }
-            }
+            // Personalization opens as a shell. Mount its form only after geometry settles.
             latestAwaitOpeningGate()
             motionState.phase = HomeAnchoredOverlayPhase.Opening
             coroutineScope {
@@ -1137,6 +1120,7 @@ internal fun HomeAnchoredMorphOverlayHost(
                 }
             }
             motionState.phase = HomeAnchoredOverlayPhase.Open
+            panelContentPrepared = true
         } else if (renderedRequest != null) {
             if (suppressClose) {
                 // Silent cleanup: the destination owns the button return. Dispose this hidden
@@ -1173,7 +1157,6 @@ internal fun HomeAnchoredMorphOverlayHost(
                                 1f,
                                 tween(
                                     durationMillis = HomePersonalizeMorphCloseDurationMillis,
-                                    delayMillis = HomeAnchoredMorphBackgroundDelayMillis,
                                     easing = HomeAnchoredBackgroundEasing
                                 )
                             )
@@ -1250,7 +1233,6 @@ internal fun HomeAnchoredMorphOverlayHost(
                 previewProgress = personalizePreviewProgress,
                 contentMounted = panelContentPrepared,
                 onContentLaidOut = {},
-                onContentRecorded = { personalizeContentRecorded.set(true) },
                 onDismissRequest = { latestOnDismissRequest() },
                 sourceContent = { sourceModifier ->
                     sourceContent(HomeAnchoredOverlayKind.Personalize, sourceModifier)
@@ -1602,7 +1584,6 @@ private fun BoxScope.HomePersonalizationAnimatedOverlay(
     previewProgress: Float,
     contentMounted: Boolean,
     onContentLaidOut: () -> Unit,
-    onContentRecorded: () -> Unit,
     onDismissRequest: () -> Unit,
     sourceContent: @Composable (Modifier) -> Unit,
     content: @Composable (Modifier) -> Unit
@@ -1699,7 +1680,7 @@ private fun BoxScope.HomePersonalizationAnimatedOverlay(
         sourceBounds,
         targetRect
     ) {
-        if (!progressiveEnvelopeRequested) {
+        if (!progressiveEnvelopeRequested && !GlassMotionExperiments.fixedMorph) {
             null
         } else {
             sampleGlassTransitionEnvelope(
@@ -1803,19 +1784,18 @@ private fun BoxScope.HomePersonalizationAnimatedOverlay(
     val shape = remember(geometry, density) {
         DeferredHomeMorphShape(geometry, continuous = true, density = density)
     }
-    val maxContentBlurPx = with(density) { 5.dp.toPx() }
-    val personalizeContentLayer = rememberGraphicsLayer()
-    val personalizeBlurredContentLayer = rememberGraphicsLayer()
-    val fixedContentBlurEffect = remember(maxContentBlurPx) {
-        BlurEffect(maxContentBlurPx, maxContentBlurPx, TileMode.Clamp)
+    val fixedAllocation = remember(stableProgressiveEnvelope, motionState.phase, backdrop) {
+        if (!GlassMotionExperiments.fixedMorph || backdrop == null ||
+            motionState.phase == HomeAnchoredOverlayPhase.Open || !useStableProgressiveSurface) null
+        else GlassMorphAllocation(checkNotNull(stableProgressiveEnvelope),
+            { geometry.value.asGlassTransitionGeometry() }, with(density) { 10.dp.toPx() })
     }
-    val preparingContentRecorded = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
-    val closingBlurRecorded = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
-    LaunchedEffect(contentMounted) {
-        if (!contentMounted) {
-            preparingContentRecorded.set(false)
-            closingBlurRecorded.set(false)
-        }
+    val maxContentBlurPx = with(density) { 5.dp.toPx() }
+    val formReveal = remember { Animatable(0f) }
+    val showForm = contentMounted && motionState.phase == HomeAnchoredOverlayPhase.Open
+    LaunchedEffect(showForm) {
+        formReveal.snapTo(0f)
+        if (showForm) formReveal.animateTo(1f, tween(220))
     }
     val targetWidth = with(density) { targetRect.width.toDp() }
     val targetHeight = with(density) { targetRect.height.toDp() }
@@ -1899,6 +1879,28 @@ private fun BoxScope.HomePersonalizationAnimatedOverlay(
         )
     }
 
+    if (fixedAllocation != null && backdrop != null) {
+        Box(Modifier.glassMorphHost(fixedAllocation).graphicsLayer {
+            clip = true
+            this.shape = fixedAllocation.envelope.insetShapeFor(fixedAllocation.geometry())
+            compositingStrategy = CompositingStrategy.Offscreen
+        }) {
+            LiquidPanel(
+                backdrop = backdrop,
+                modifier = Modifier.fillMaxSize().graphicsLayer {
+                    alpha = geometry.value.surfaceAlpha * (1f - latestPreviewProgress.value.coerceIn(0f, 1f))
+                },
+                shape = shape,
+                surfaceColor = if (glassUsesLightStyle(config)) {
+                    HomeLightGlassSurfaceColor.copy(alpha = HomeLightGlassPanelTintAlpha)
+                } else Color(0xFF121212).copy(alpha = 0.30f),
+                lensHeight = 16.dp,
+                lensAmount = 24.dp,
+                morphAllocation = fixedAllocation
+            ) { }
+        }
+    }
+
     Box(
         modifier = Modifier
             .offset {
@@ -1922,7 +1924,7 @@ private fun BoxScope.HomePersonalizationAnimatedOverlay(
                     geometry.value.pathProgress >= 0.999f
                 clip = !fullOpenEndpoint
                 this.shape = shape
-                compositingStrategy = if (fullOpenEndpoint) {
+                compositingStrategy = if (fullOpenEndpoint || fixedAllocation != null) {
                     CompositingStrategy.Auto
                 } else {
                     CompositingStrategy.Offscreen
@@ -1943,12 +1945,13 @@ private fun BoxScope.HomePersonalizationAnimatedOverlay(
             shape = shape,
             progressiveBlur = false,
             renderProgressiveBackdropPass = false,
+            renderMaterial = fixedAllocation == null,
             warmupBackdropEffects = warmupBackdropEffects,
             surfaceAlphaProvider = {
                 geometry.value.surfaceAlpha *
                     (1f - latestPreviewProgress.value.coerceIn(0f, 1f))
             },
-            contentAlphaProvider = { geometry.value.contentAlpha },
+            contentAlphaProvider = { formReveal.value },
             contentBlurRadiusPxProvider = {
                 // Blur is now a crossfade between two pre-recorded GPU layers below. Leaving this
                 // outer target-sized layer unblurred avoids recomputing a full form RenderEffect on
@@ -1959,64 +1962,9 @@ private fun BoxScope.HomePersonalizationAnimatedOverlay(
             onContentLaidOut = onContentLaidOut,
             modifier = Modifier.fillMaxSize(),
             content = { contentModifier ->
-                if (contentMounted) {
+                if (showForm) {
                     content(
-                        contentModifier.drawWithContent {
-                            val phase = motionState.phase
-                            if (phase == HomeAnchoredOverlayPhase.Preparing &&
-                                preparingContentRecorded.compareAndSet(false, true)
-                            ) {
-                                personalizeContentLayer.record {
-                                    this@drawWithContent.drawContent()
-                                }
-                                personalizeBlurredContentLayer.record(
-                                    size = IntSize(
-                                        size.width.roundToInt().coerceAtLeast(1),
-                                        size.height.roundToInt().coerceAtLeast(1)
-                                    )
-                                ) {
-                                    drawLayer(personalizeContentLayer)
-                                }
-                                personalizeBlurredContentLayer.renderEffect = fixedContentBlurEffect
-                                onContentRecorded()
-                            }
-                            if (phase == HomeAnchoredOverlayPhase.Open) {
-                                preparingContentRecorded.set(true)
-                                closingBlurRecorded.set(false)
-                                // Open is a live, interactive state. Do not re-record the entire
-                                // settings tree on every slider/preview frame; the Preparing layer
-                                // is retained for the next close and the live tree is drawn once.
-                                this@drawWithContent.drawContent()
-                            } else {
-                                if (phase == HomeAnchoredOverlayPhase.Closing &&
-                                    closingBlurRecorded.compareAndSet(false, true)
-                                ) {
-                                    personalizeContentLayer.record {
-                                        this@drawWithContent.drawContent()
-                                    }
-                                    personalizeBlurredContentLayer.record(
-                                        size = IntSize(
-                                            size.width.roundToInt().coerceAtLeast(1),
-                                            size.height.roundToInt().coerceAtLeast(1)
-                                        )
-                                    ) {
-                                        drawLayer(personalizeContentLayer)
-                                    }
-                                    personalizeBlurredContentLayer.renderEffect = fixedContentBlurEffect
-                                }
-                                val blurMix = (
-                                    1f - homeMorphSmoothStep(
-                                        0.42f,
-                                        0.98f,
-                                        geometry.value.expansionProgress
-                                    )
-                                    ).coerceIn(0f, 1f)
-                                personalizeContentLayer.alpha = 1f - blurMix
-                                personalizeBlurredContentLayer.alpha = blurMix
-                                if (blurMix < 0.999f) drawLayer(personalizeContentLayer)
-                                if (blurMix > 0.001f) drawLayer(personalizeBlurredContentLayer)
-                            }
-                        }
+                        contentModifier
                     )
                 }
             }
@@ -2073,6 +2021,7 @@ private fun DeferredHomePersonalizeMorphPanel(
     shape: Shape,
     progressiveBlur: Boolean,
     renderProgressiveBackdropPass: Boolean,
+    renderMaterial: Boolean = true,
     warmupBackdropEffects: Boolean,
     surfaceAlphaProvider: () -> Float,
     contentAlphaProvider: () -> Float,
@@ -2104,7 +2053,7 @@ private fun DeferredHomePersonalizeMorphPanel(
             clip = true
         }
     ) {
-        if (showSurface) {
+        if (showSurface && renderMaterial) {
             if (backdrop != null) {
                 if (progressiveBlur && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     DeferredProgressivePersonalizeSurface(

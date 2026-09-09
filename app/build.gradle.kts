@@ -65,8 +65,8 @@ android {
         applicationId = "com.xiaomanjun.sleepdownschedule"
         minSdk = 26
         targetSdk = 36
-        versionCode = 30
-        versionName = "1.2.4"
+        versionCode = 31
+        versionName = "1.2.5_beta3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField("String", "SLEEPDOWN_API_BASE_URL", "\"https://api.sleepdownschedule.cn\"")
         buildConfigField(
@@ -93,7 +93,16 @@ android {
     }
 
     buildTypes {
+        val glassOcclusionMode = providers.gradleProperty("sleepdown.glassOcclusionMode")
+            .getOrElse("legacy")
+        require(glassOcclusionMode in setOf("legacy", "retained", "live"))
+        all {
+            buildConfigField("String", "GLASS_OCCLUSION_MODE", "\"legacy\"")
+            buildConfigField("boolean", "GLASS_FIXED_MORPH", "false")
+        }
         getByName("debug") {
+            buildConfigField("boolean", "GLASS_FIXED_MORPH", providers.gradleProperty("sleepdown.glassFixedMorph").getOrElse("false").toBoolean().toString())
+            buildConfigField("String", "GLASS_OCCLUSION_MODE", "\"$glassOcclusionMode\"")
             applicationIdSuffix = ".debug"
             buildConfigField("String", "SLEEPDOWN_REMOTE_CONFIG_SECRET", "\"\"")
             buildConfigField("boolean", "SLEEPDOWN_REMOTE_AI_ENABLED", "false")
@@ -111,6 +120,8 @@ android {
         }
         create("benchmark") {
             initWith(getByName("release"))
+            buildConfigField("boolean", "GLASS_FIXED_MORPH", providers.gradleProperty("sleepdown.glassFixedMorph").getOrElse("false").toBoolean().toString())
+            buildConfigField("String", "GLASS_OCCLUSION_MODE", "\"$glassOcclusionMode\"")
             matchingFallbacks += listOf("release")
             applicationIdSuffix = ".benchmark"
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
@@ -193,7 +204,7 @@ dependencies {
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     implementation("androidx.palette:palette-ktx:1.0.0")
     compileOnly("com.oplus.animation:viewseamless:1.0.0@aar")
-    implementation("io.github.kyant0:backdrop:2.0.0")
+    implementation(project(":kyant-backdrop"))
     implementation("io.github.kyant0:shapes:1.2.0")
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.3")
     implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.3")

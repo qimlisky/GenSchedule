@@ -1,5 +1,7 @@
 package com.xiaomanjun.sleepdownschedule.feature.home.day
 
+import androidx.compose.runtime.SideEffect
+
 import com.xiaomanjun.sleepdownschedule.app.ui.*
 import com.xiaomanjun.sleepdownschedule.app.startup.*
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.*
@@ -854,7 +856,8 @@ internal fun HomeWallpaper(
     images: HomeWallpaperImages,
     phase: StartupPhase,
     reduceQuality: Boolean = false,
-    previewState: PersonalizationPreviewState? = null
+    previewState: PersonalizationPreviewState? = null,
+    onRecordKeyChanged: ((Any?) -> Unit)? = null
 ) {
     val targetBitmap = images.source
     val targetBlurredBitmap = images.blurredSource
@@ -871,6 +874,19 @@ internal fun HomeWallpaper(
         animationSpec = tween(durationMillis = 140),
         label = "wallpaper-crossfade"
     )
+    // The producer may reuse only a settled image. In particular, a target image's identity
+    // alone is insufficient during the 140 ms crossfade or before LaunchedEffect hands it off.
+    val previewBlur = previewState?.wallpaperBlur
+    val recordKey = if (
+        previousBitmap == null && crossfadeAlpha == 1f &&
+        visibleBitmap != null && visibleBitmap == targetBitmap &&
+        visibleBlurredBitmap == targetBlurredBitmap && visibleReducedBitmap == targetReducedBitmap
+    ) listOf(visibleBitmap, visibleBlurredBitmap, visibleReducedBitmap, config, reduceQuality, previewBlur)
+    else null
+    SideEffect { onRecordKeyChanged?.invoke(recordKey) }
+    DisposableEffect(onRecordKeyChanged) {
+        onDispose { onRecordKeyChanged?.invoke(null) }
+    }
     LaunchedEffect(targetBitmap, targetBlurredBitmap, targetReducedBitmap) {
         if (
             targetBitmap != visibleBitmap ||
@@ -991,6 +1007,9 @@ private fun HomeWallpaperLayer(
 ) {
     val density = LocalDensity.current
     val previewBlurPx = with(density) { (previewBlurDp ?: 0f).dp.toPx() }
+    val previewBlurEffect = remember(previewBlurPx) {
+        if (previewBlurPx > 0.1f) BlurEffect(previewBlurPx, previewBlurPx, TileMode.Decal) else null
+    }
     FocusCroppedWallpaper(
         bitmap = bitmap,
         config = config,
@@ -998,11 +1017,7 @@ private fun HomeWallpaperLayer(
             .fillMaxSize()
             .graphicsLayer {
                 this.alpha = alpha
-                renderEffect = if (previewBlurPx > 0.1f) {
-                    BlurEffect(previewBlurPx, previewBlurPx, TileMode.Decal)
-                } else {
-                    null
-                }
+                renderEffect = previewBlurEffect
             },
         useSavedCrop = useSavedCrop
     )

@@ -466,7 +466,8 @@ private fun validateAgentCoursePatch(
             periods = periods,
             weeks = weeks,
             weekParity = parity,
-            note = patch.note?.trim()?.takeIf { it.isNotBlank() } ?: base.note,
+            // Omitted/null means unchanged; an explicit empty string clears the note.
+            note = if (patch.note == null) base.note else patch.note.trim().takeIf(String::isNotBlank),
             customStartTime = customRange.first,
             customEndTime = customRange.second,
             scheduleId = facts.scheduleId

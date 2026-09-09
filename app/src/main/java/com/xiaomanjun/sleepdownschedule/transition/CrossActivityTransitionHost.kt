@@ -94,6 +94,10 @@ fun CrossActivityTransitionHost(
                 openingMode = openingMode,
                 openingReady = openingReady,
                 handleSystemBack = handleSystemBack,
+                nativeRoundClip = routeId == TransitionRouteId.QuickSheetToSettingsDetail ||
+                    routeId == TransitionRouteId.HomeToSettingsDetail ||
+                    routeId == TransitionRouteId.SettingsToSettingsDetail ||
+                    routeId == TransitionRouteId.ScheduleManagerToSettingsDetail,
                 onOpened = {
                     if (session?.hasReachedNativeRunning != true) {
                         ActivityTransitionCoordinator.markOpen(sessionId)
