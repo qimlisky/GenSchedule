@@ -3,6 +3,7 @@ package com.xiaomanjun.sleepdownschedule.feature.widget.providers
 import com.xiaomanjun.sleepdownschedule.*
 import com.xiaomanjun.sleepdownschedule.feature.widget.*
 import com.xiaomanjun.sleepdownschedule.feature.agent.*
+import com.xiaomanjun.sleepdownschedule.core.identity.currentIconResId
 
 import android.app.AlarmManager
 import android.app.PendingIntent
@@ -463,6 +464,7 @@ open class TodayAssistantWidgetProviderHost : AppWidgetProvider() {
 }
 
 internal object MiuixTodayWidgetRenderer {
+    private var publishedPreviewIconResId: Int? = null
     private val ACTION_REFRESH = "${BuildConfig.APPLICATION_ID}.action.REFRESH_TODAY_WIDGET"
     private val timeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
@@ -495,6 +497,23 @@ internal object MiuixTodayWidgetRenderer {
         val assistantIds = manager.getAppWidgetIds(ComponentName(context, TodayAssistantWidgetProvider::class.java))
         if (assistantIds.isNotEmpty()) {
             TodayAssistantWidgetRenderer.refreshNow(context, manager, assistantIds)
+        }
+        // Generated previews can reflect preferences; XML previews cannot. A rejected
+        // (rate-limited) update is retried only on the next ordinary widget refresh.
+        if (Build.VERSION.SDK_INT >= 35) {
+            val iconResId = currentIconResId(context)
+            if (publishedPreviewIconResId != iconResId) {
+                val preview = RemoteViews(context.packageName, R.layout.widget_preview_today_courses).apply {
+                    setImageViewResource(R.id.widget_app_icon, iconResId)
+                }
+                if (manager.setWidgetPreview(
+                        ComponentName(context, TodayCoursesWidgetProvider::class.java),
+                        android.appwidget.AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN,
+                        preview
+                    )) {
+                    publishedPreviewIconResId = iconResId
+                }
+            }
         }
     }
 
@@ -595,6 +614,9 @@ internal object MiuixTodayWidgetRenderer {
         val courseColorAssignments = WidgetCourseColors.assignments(context, state, dark)
         val typography = coursesWidgetTypography(variant, metrics)
         return RemoteViews(context.packageName, layout).apply {
+            if (variant == TodayWidgetVariant.LARGE) {
+                setImageViewResource(R.id.widget_app_icon, currentIconResId(context))
+            }
             applyTheme(dark, variant)
             applyCustomBackground(custom)
             applyCoursesWidgetLayout(context, variant, metrics)
