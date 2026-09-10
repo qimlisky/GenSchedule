@@ -110,6 +110,24 @@ git clone https://gitee.com/xiaomanjun233/SleepDown-Schedule.git
 
 提交改进与 Pull Request 的具体步骤见文末[开发协作](#开发协作)章节。
 
+### 本地构建的 Miuix 依赖
+
+Android 工程通过 composite build 使用官方 Miuix `v0.9.3` 加本仓库补丁。不能直接换成未修改的 Maven 依赖；`Scaffold.underlayModifier`、弹窗表面和内容裁切等接口来自这些补丁，无需另外寻找私人 fork。
+
+在项目根目录执行以下 PowerShell 命令（使用全新的依赖目录，不要在已打旧补丁的目录重复应用）：
+
+```powershell
+git clone --branch v0.9.3 --depth 1 https://github.com/compose-miuix-ui/miuix.git ../miuix-reference
+$miuixPatchRoot = (Resolve-Path ./patches).Path
+git -C ../miuix-reference apply "$miuixPatchRoot/miuix-0.9.3-sleepdown.patch"
+git -C ../miuix-reference apply "$miuixPatchRoot/miuix-cascading-popup-surface.patch"
+git -C ../miuix-reference apply "$miuixPatchRoot/miuix-scaffold-underlay.patch"
+$miuixSourceRoot = (Resolve-Path ../miuix-reference).Path
+.\gradlew.bat assembleGithubDebug "-Psleepdown.miuixSourcePath=$miuixSourceRoot"
+```
+
+先在 Android Studio 配置 Android SDK 与 Gradle JDK。命令行 `sleepdown.miuixSourcePath` 会覆盖本地配置中的路径；Release 签名需自行配置，不随源码分发。补丁基线、范围和验证说明见 [patches/README.md](patches/README.md)。
+
 ## 项目结构
 
 ```text
@@ -133,6 +151,7 @@ CourseSchedule/
 ├── patches/miuix-0.9.3-sleepdown.patch      # Miuix 基础组合构建补丁
 ├── patches/miuix-cascading-popup-surface.patch
 │                                           # 级联菜单玻璃表面扩展
+├── patches/miuix-scaffold-underlay.patch     # 页面采样层与弹窗宿主分离
 ├── THIRD_PARTY_NOTICES.md                    # 第三方代码与许可声明
 └── gradlew / gradlew.bat                     # Gradle Wrapper
 ```

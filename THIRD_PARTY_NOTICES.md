@@ -20,9 +20,12 @@ License: Apache License, Version 2.0.
 
 SleepDown-Schedule combines Miuix layout and interaction components with its
 existing Kyant liquid-glass surfaces and controls. The Miuix blur module is not
-included. The tracked `patches/miuix-0.9.3-sleepdown.patch` adds only the
-surface-modifier hooks and centered-dialog option required by those combined
-surfaces.
+included. The tracked Miuix patches expose surface modifiers, centered dialogs,
+content clipping and popup lifecycle hooks used by those combined surfaces.
+`patches/miuix-scaffold-underlay.patch` separates the Scaffold page underlay from
+its popup host so backdrop consumers do not sample a producer that contains
+themselves. The patch base, application order and scope are documented in
+`patches/README.md`; the original package names and license headers are retained.
 
 ## xingheyuzhuan/shiguang_warehouse
 
