@@ -13,6 +13,7 @@ import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -223,7 +224,7 @@ internal fun CourseShortcutOverlay(
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.close { controller.copyRequest = request }
                     },
-                    AddMenuAction(R.drawable.ic_trash, "移除") {
+                    AddMenuAction(R.drawable.ic_trash, "移除", iconTint = Color(0xFFFF453A)) {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.close { onRemove(request.course, request.week) }
                     }

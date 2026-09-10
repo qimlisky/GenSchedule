@@ -145,6 +145,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -555,12 +556,9 @@ internal fun SinglePillWeekScheduleScreen(
             retainEditControlOverflow = false
         }
     }
-    // Keep equal drawing/scrolling room on both sides while edit chrome is visible. The
-    // previous top-only gutter protected the first-row delete pill but left the last-row card
-    // and resize handle inside the pager's clip boundary, so the final grid cell could neither
-    // be reached reliably nor be shown completely during the edit-mode entrance frame.
-    // Includes the badge's glass shadow and entrance overshoot, not just its 4dp offset.
+    // Include the glass shadow and entrance overshoot, with extra room below the last row.
     val editControlOverflow = if (retainEditControlOverflow) 24.dp else 0.dp
+    val editControlBottomOverflow = if (retainEditControlOverflow) 40.dp else 0.dp
     LaunchedEffect(state.config.id, displayWeek, weekEditMode) {
         if (!weekEditMode) weekEditOverlay.clear()
     }
@@ -671,7 +669,7 @@ internal fun SinglePillWeekScheduleScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(cardHeight * state.periods.size + supplementaryHeight + editControlOverflow)
+                        .height(cardHeight * state.periods.size + supplementaryHeight + editControlBottomOverflow)
                         .then(if (retainEditControlOverflow) Modifier else Modifier.clipToBounds())
                 ) {
                     Column(
@@ -786,7 +784,10 @@ internal fun SinglePillWeekScheduleScreen(
                             modifier = Modifier
                                 .offset(y = -editControlOverflow)
                                 .fillMaxWidth()
-                                .height(cardHeight * state.periods.size + supplementaryHeight + editControlOverflow * 2f),
+                                // The parent reserves the bottom gutter. Allow the pager's extra
+                                // top gutter to extend above it without compressing the last row.
+                                .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                                .height(cardHeight * state.periods.size + supplementaryHeight + editControlOverflow + editControlBottomOverflow),
                             userScrollEnabled = !weekEditMode,
                             // Keep the pager topology stable while a home overlay opens/closes.
                             // Disposing the adjacent week at the exact frame Personalization
@@ -808,7 +809,7 @@ internal fun SinglePillWeekScheduleScreen(
                                 modifier = Modifier.padding(
                                     start = rowHeaderWidth,
                                     top = editControlOverflow,
-                                    bottom = editControlOverflow,
+                                    bottom = editControlBottomOverflow,
                                     end = weekGridEndPadding
                                 ),
                                 courses = pageCourses,
@@ -870,7 +871,7 @@ internal fun SinglePillWeekScheduleScreen(
                     }
                 }
             }
-            Spacer(Modifier.height(WeekDockScrollPadding))
+            Spacer(Modifier.height(WeekDockScrollPadding + adaptiveMetrics.safeBottom))
         }
     }
         WeekEditOverlayHost(
@@ -1282,7 +1283,7 @@ private fun WeekResizeCornerHandle(
     } else {
         ComposeColor.White.copy(alpha = if (selected) 0.88f else 0.72f)
     }
-    val badgeSize = (cardCorner * 1.6f + 10.dp).coerceIn(18.dp, 40.dp)
+    val badgeSize = (cardCorner * 1.35f + 8.dp).coerceIn(16.dp, 34.dp)
         .coerceAtMost(minOf(cardSize.width, cardSize.height) / 2f + 4.dp)
     val handleShape = remember(cardSize, cardCorner, badgeSize) {
         WeekResizeCornerShape(cardSize, cardCorner, badgeSize)

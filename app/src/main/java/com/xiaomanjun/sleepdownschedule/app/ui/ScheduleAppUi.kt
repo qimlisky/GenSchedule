@@ -5289,6 +5289,7 @@ data class AddMenuAction(
     val iconRes: Int? = null,
     val label: String,
     val imageVector: ImageVector? = null,
+    val iconTint: ComposeColor? = null,
     val onClick: () -> Unit
 )
 
@@ -5338,7 +5339,7 @@ fun AddMenuLiquidItem(
                         ?: painterResource(requireNotNull(action.iconRes)),
                     contentDescription = null,
                     modifier = Modifier.size(if (compactCapsule) 20.dp else 21.dp),
-                    tint = baseText
+                    tint = action.iconTint ?: baseText
                 )
                 Text(
                     action.label,

@@ -39,7 +39,7 @@ internal class WeekResizeCornerShape(
         val stroke = Path()
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 6f * scale
+            strokeWidth = 8f * scale
             strokeJoin = Paint.Join.ROUND
         }.getFillPath(cardPath, stroke)
         // The 44dp input host is offset by 4dp. Cancel that offset so the material hugs the
@@ -48,7 +48,7 @@ internal class WeekResizeCornerShape(
         stroke.op(Path().apply { addRect(0f, 0f, size.width, size.height, Path.Direction.CW) }, Path.Op.INTERSECT)
         val rounded = Path()
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            pathEffect = CornerPathEffect(3f * scale)
+            pathEffect = CornerPathEffect(4f * scale)
         }.getFillPath(stroke, rounded)
         return Outline.Generic(rounded.asComposePath())
     }
