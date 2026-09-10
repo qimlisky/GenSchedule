@@ -184,11 +184,11 @@ internal fun CourseShortcutOverlay(
                 )
             }
             val source = request.bounds.translate(-host.topLeft)
-            val rowHeight = 44.dp * density.fontScale.coerceAtLeast(1f)
+            val rowHeight = 36.dp * density.fontScale.coerceAtLeast(1f)
             val placement = with(density) {
                 val readableWidth = (120.dp + 64.dp * density.fontScale.coerceAtLeast(1f)).toPx()
                 courseShortcutPlacement(source, available, maxOf(source.width + 40.dp.toPx(), readableWidth),
-                    (rowHeight * 3f + 14.dp).toPx(), 10.dp.toPx())
+                    (rowHeight * 3f + CourseShortcutContentPaddingDp.dp * 2f).toPx(), 10.dp.toPx())
             }
             Box(
                 Modifier.offset { IntOffset(source.left.roundToInt(), source.top.roundToInt()) }
@@ -229,8 +229,8 @@ internal fun CourseShortcutOverlay(
                 surfaceAlphaProvider = { controller.progress.value.coerceIn(0f, 1f) },
                 contentAlphaProvider = { controller.progress.value.coerceIn(0f, 1f) },
                 interactive = !controller.closing,
-                // Inner capsule radius = (rowHeight - 2dp) / 2, with an equal 8dp inset.
-                shape = RoundedRectangle(rowHeight / 2 + 7.dp),
+                // The selection has a 1dp vertical inset; keep its radius concentric with the shell.
+                shape = RoundedRectangle(rowHeight / 2 + CourseShortcutContentPaddingDp.dp),
                 showModeSwitch = false, actionItemHeight = rowHeight, compactActions = true,
                 modifier = Modifier
                     .offset { IntOffset(target.left.roundToInt(), target.top.roundToInt()) }

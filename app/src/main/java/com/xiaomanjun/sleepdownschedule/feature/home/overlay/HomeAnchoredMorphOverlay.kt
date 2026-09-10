@@ -189,6 +189,7 @@ private const val HomeAddMenuSectionGapDp = 4f
 private const val HomeAddMenuDividerHeightDp = 1f
 private const val HomeAddMenuActionItemHeightDp = 40f
 private const val HomeAddMenuActionGapDp = 0f
+internal const val CourseShortcutContentPaddingDp = 5f
 
 // The visible trajectory is cubic-bezier for its complete duration. LinearEasing below is only
 // used as the phase clock, so absolute handoff/rebound timings stay stable.
@@ -2464,7 +2465,7 @@ internal fun HomeAddMenuMorphPanel(
     val itemStepPx = with(density) {
         (actionItemHeight + HomeAddMenuActionGapDp.dp).toPx()
     }
-    val contentTopPadding = if (compactActions) 7.dp else HomeAddMenuContentTopPaddingDp.dp
+    val contentTopPadding = if (compactActions) CourseShortcutContentPaddingDp.dp else HomeAddMenuContentTopPaddingDp.dp
     val contentTopPaddingPx = with(density) { contentTopPadding.toPx() }
     val modeHeightPx = with(density) { if (showModeSwitch) HomeAddMenuModeHeightDp.dp.toPx() else 0f }
     val actionTopPx = with(density) {
@@ -2604,10 +2605,10 @@ internal fun HomeAddMenuMorphPanel(
                     }
                 }
                 .padding(
-                    start = if (compactActions) 6.dp else (HomeAddMenuConcentricInsetDp - HomeAddMenuActionColumnInsetDp).dp,
+                    start = if (compactActions) (CourseShortcutContentPaddingDp + 1f - HomeAddMenuActionColumnInsetDp).dp else (HomeAddMenuConcentricInsetDp - HomeAddMenuActionColumnInsetDp).dp,
                     top = contentTopPadding,
-                    end = if (compactActions) 6.dp else (HomeAddMenuConcentricInsetDp - HomeAddMenuActionColumnInsetDp).dp,
-                    bottom = if (compactActions) 7.dp else (HomeAddMenuConcentricInsetDp - HomeAddMenuSelectionVerticalInsetDp).dp
+                    end = if (compactActions) (CourseShortcutContentPaddingDp + 1f - HomeAddMenuActionColumnInsetDp).dp else (HomeAddMenuConcentricInsetDp - HomeAddMenuActionColumnInsetDp).dp,
+                    bottom = if (compactActions) CourseShortcutContentPaddingDp.dp else (HomeAddMenuConcentricInsetDp - HomeAddMenuSelectionVerticalInsetDp).dp
                 )
                 .then(unifiedMenuGestureModifier)
         ) {
