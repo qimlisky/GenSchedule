@@ -143,7 +143,7 @@ fun WidgetCustomizationScreen(
     val topPadding = detailContentTopPadding() +
         if (adaptiveMetrics.isLargeScreen) 18.dp else 0.dp
 
-    fun installedIds(type: WidgetAppearanceVariant): IntArray {
+    fun providerComponent(type: WidgetAppearanceVariant): ComponentName {
         val provider = when (type) {
             WidgetAppearanceVariant.COURSES_LARGE -> TodayCoursesWidgetProvider::class.java
             WidgetAppearanceVariant.COURSES_SQUARE -> TodayCoursesSquareWidgetProvider::class.java
@@ -151,8 +151,9 @@ fun WidgetCustomizationScreen(
             WidgetAppearanceVariant.WEEK_SCHEDULE -> WeekScheduleWidgetProvider::class.java
             WidgetAppearanceVariant.TODAY_ASSISTANT -> TodayAssistantWidgetProvider::class.java
         }
-        return manager.getAppWidgetIds(ComponentName(context, provider))
+        return ComponentName(context, provider)
     }
+    fun installedIds(type: WidgetAppearanceVariant): IntArray = manager.getAppWidgetIds(providerComponent(type))
     val widgetTypes = ActiveWidgetAppearanceVariants
     val pagerState = rememberPagerState { widgetTypes.size }
     val selectedPage by remember(pagerState) {
@@ -327,6 +328,20 @@ fun WidgetCustomizationScreen(
                     ProjectPagerIndicator(
                         pagerState = pagerState,
                         pageCount = widgetTypes.size
+                    )
+                    LiquidMenuButton(
+                        backdrop = backdrop,
+                        label = "添加到桌面",
+                        onClick = {
+                            val requested = manager.isRequestPinAppWidgetSupported &&
+                                manager.requestPinAppWidget(providerComponent(selectedType), null, null)
+                            if (!requested) {
+                                Toast.makeText(context, "当前桌面不支持直接添加，请在桌面长按空白处添加小组件", Toast.LENGTH_LONG).show()
+                            }
+                        },
+                        modifier = Modifier.width(132.dp),
+                        textColorOverride = Color.White,
+                        surfaceColorOverride = Color(0xFF0A84FF).copy(alpha = 0.72f)
                     )
                     LiquidMenuButton(
                         backdrop = backdrop,
