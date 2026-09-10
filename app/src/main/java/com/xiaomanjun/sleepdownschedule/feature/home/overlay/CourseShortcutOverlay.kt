@@ -8,6 +8,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.ContentCopy
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -21,6 +23,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -44,6 +47,7 @@ internal data class CourseShortcutRequest(
     val week: Int,
     val bounds: Rect,
     val cornerPx: Float,
+    val pivotX: Float,
     val enterEditMode: () -> Unit
 )
 
@@ -119,13 +123,17 @@ internal class CourseShortcutController(private val scope: CoroutineScope) {
 
 internal data class CourseShortcutPlacement(val bounds: Rect, val pivotX: Float)
 
-/** Physical screen thirds, deliberately independent of weekday count and layout direction. */
-internal fun courseShortcutPlacement(anchor: Rect, available: Rect, width: Float, height: Float, gap: Float): CourseShortcutPlacement {
+/** Only the single middle column opens centrally; even column counts have no central column. */
+internal fun courseShortcutPivot(columnIndex: Int, columnCount: Int, layoutDirection: LayoutDirection): Float {
     val pivot = when {
-        anchor.center.x < available.left + available.width / 3f -> 0f
-        anchor.center.x > available.right - available.width / 3f -> 1f
+        columnIndex * 2 < columnCount - 1 -> 0f
+        columnIndex * 2 > columnCount - 1 -> 1f
         else -> 0.5f
     }
+    return if (layoutDirection == LayoutDirection.Rtl) 1f - pivot else pivot
+}
+
+internal fun courseShortcutPlacement(anchor: Rect, available: Rect, width: Float, height: Float, gap: Float, pivot: Float): CourseShortcutPlacement {
     val w = width.coerceAtMost(available.width).coerceAtLeast(1f)
     val h = height.coerceAtMost(available.height).coerceAtLeast(1f)
     val x = (anchor.left + anchor.width * pivot - w * pivot)
@@ -184,11 +192,11 @@ internal fun CourseShortcutOverlay(
                 )
             }
             val source = request.bounds.translate(-host.topLeft)
-            val rowHeight = 36.dp * density.fontScale.coerceAtLeast(1f)
+            val rowHeight = 40.dp * density.fontScale.coerceAtLeast(1f)
             val placement = with(density) {
                 val readableWidth = (120.dp + 64.dp * density.fontScale.coerceAtLeast(1f)).toPx()
                 courseShortcutPlacement(source, available, maxOf(source.width + 40.dp.toPx(), readableWidth),
-                    (rowHeight * 3f + CourseShortcutContentPaddingDp.dp * 2f).toPx(), 10.dp.toPx())
+                    (rowHeight * 3f + CourseShortcutContentPaddingDp.dp * 2f).toPx(), 10.dp.toPx(), request.pivotX)
             }
             Box(
                 Modifier.offset { IntOffset(source.left.roundToInt(), source.top.roundToInt()) }
@@ -211,7 +219,7 @@ internal fun CourseShortcutOverlay(
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.close(request.enterEditMode)
                     },
-                    AddMenuAction(R.drawable.ic_add_course, "复制课程") {
+                    AddMenuAction(label = "复制课程", imageVector = Icons.Rounded.ContentCopy) {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.close { controller.copyRequest = request }
                     },

@@ -1696,6 +1696,7 @@ fun WeekDayColumn(
     backdrop: Backdrop?,
     floatingBackdrop: Backdrop? = backdrop,
     config: ScheduleConfigEntity,
+    shortcutPivotX: Float,
     weekMotionDirection: Int = 0,
     weekMotionOutgoing: Boolean = false,
     dayIndex: Int = 1,
@@ -1808,6 +1809,7 @@ fun WeekDayColumn(
                     weekMotionOutgoing = weekMotionOutgoing,
                     dayIndex = dayIndex,
                     periodIndex = periodIndexes[segment.startPosition],
+                    shortcutPivotX = shortcutPivotX,
                     gridColumnWidth = gridColumnWidth,
                     cardLayoutWidth = measuredCardLayoutWidth,
                     periodRowHeight = periodRowHeight,
@@ -1975,8 +1977,10 @@ fun WeekCourseColumnsLayer(
     ) {
         val dayColumnWidth = maxWidth / weekdays.size.coerceAtLeast(1)
         val travel = with(density) { (maxWidth + 96.dp).toPx() }
+        val layoutDirection = androidx.compose.ui.platform.LocalLayoutDirection.current
         Row(modifier = Modifier.fillMaxWidth()) {
             weekdays.forEachIndexed { columnIndex, day ->
+                val shortcutPivotX = courseShortcutPivot(columnIndex, weekdays.size, layoutDirection)
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -1994,6 +1998,7 @@ fun WeekCourseColumnsLayer(
                         weekMotionDirection = weekMotionDirection,
                         weekMotionOutgoing = outgoing,
                         dayIndex = day,
+                        shortcutPivotX = shortcutPivotX,
                         gridColumnWidth = dayColumnWidth,
                         periodRowHeight = cardHeight,
                         layerOffset = layerOffset,
@@ -2045,6 +2050,7 @@ fun WeekCourseColumnsLayer(
                                     course = course, periods = periods, height = 64.dp,
                                     cardColor = cardColor, backdrop = backdrop, floatingBackdrop = floatingBackdrop,
                                     config = config, dayIndex = day, gridColumnWidth = dayColumnWidth,
+                                    shortcutPivotX = shortcutPivotX,
                                     stackIndex = index, editMode = editMode, editWeek = editWeek,
                                     allWeekCourses = allWeekCourses, editScrollState = editScrollState,
                                     onEnterEditMode = onEnterEditMode,
@@ -2890,6 +2896,7 @@ fun WeekCourseBlock(
     backdrop: Backdrop?,
     floatingBackdrop: Backdrop? = backdrop,
     config: ScheduleConfigEntity,
+    shortcutPivotX: Float,
     weekMotionDirection: Int = 0,
     weekMotionOutgoing: Boolean = false,
     dayIndex: Int = 1,
@@ -3089,7 +3096,7 @@ fun WeekCourseBlock(
     val openShortcut by rememberUpdatedState<() -> Unit> {
         ownBoundsRef[0]?.let { bounds ->
             shortcuts?.open(CourseShortcutRequest(course, editWeek, bounds,
-                with(density) { cardCorner.toPx() }, onEnterEditMode))
+                with(density) { cardCorner.toPx() }, shortcutPivotX, onEnterEditMode))
         }
     }
     val startBodyDrag by rememberUpdatedState<(Offset) -> Boolean> { position ->

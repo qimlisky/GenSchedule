@@ -95,6 +95,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
@@ -5284,8 +5286,9 @@ internal fun HomeIconButtonVisual(
 }
 
 data class AddMenuAction(
-    val iconRes: Int,
+    val iconRes: Int? = null,
     val label: String,
+    val imageVector: ImageVector? = null,
     val onClick: () -> Unit
 )
 
@@ -5331,7 +5334,8 @@ fun AddMenuLiquidItem(
                 horizontalArrangement = Arrangement.spacedBy(if (compactCapsule) 12.dp else 10.dp)
             ) {
                 Icon(
-                    painterResource(action.iconRes),
+                    action.imageVector?.let { rememberVectorPainter(it) }
+                        ?: painterResource(requireNotNull(action.iconRes)),
                     contentDescription = null,
                     modifier = Modifier.size(if (compactCapsule) 20.dp else 21.dp),
                     tint = baseText
