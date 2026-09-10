@@ -45,16 +45,27 @@ never be shared across consumers. Unsupported custom export is rejected, not sil
 
 ## Host regression tests
 
-`SharedBlurBackdrop` is a SleepDown implementation of the shared wallpaper prefix approach
-observed in NexioSchedule commit 77b78f24741d513447715f40b9892228b1cedef8 (master, not release
-v1.4.8-0903). The current prefix uses 0.5 source scale and proportionally scaled blur, retaining
-the original vibrancy-before-blur order;
-cards retain their own lens, highlight and shadows. The recorder node owns one layer and releases
-it on detach. No Nexio source text is vendored. Nonmatching consumers keep the original source.
+`SharedBlurBackdrop` shares the wallpaper prefix across course cards. The 2026-09-10 alignment
+uses NexioSchedule commit `2971759ed3bb7b16ef13e639fba5dbf2a6a9cb2d` as its reference:
+[DrawBackdropModifier](https://github.com/HaoZai000/NexioSchedule/blob/2971759ed3bb7b16ef13e639fba5dbf2a6a9cb2d/app/src/main/java/com/kyant/backdrop/DrawBackdropModifier.kt),
+[SharedBlurBackdrop](https://github.com/HaoZai000/NexioSchedule/blob/2971759ed3bb7b16ef13e639fba5dbf2a6a9cb2d/app/src/main/java/com/kyant/backdrop/backdrops/SharedBlurBackdrop.kt).
+The matching course path uses a 0.48 shared source and consumer buffer, proportionally scaled
+blur, direct sampled-pixel translation into the card, and a per-card lens with depthEffect=false.
+Course cards do not apply vibrancy before blur. SleepDown's tint, preset edge highlight, outline
+light and shadows remain additional decorations at the original layout resolution.
+
+The direct sampling branch is adapted from that Nexio implementation, retaining the upstream
+Apache-2.0 component packages and license. Consumers with inverse transforms, fixed geometry,
+exports or mismatched scales retain the generic coordinate-correct path. The recorder owns one
+layer and releases it on detach; SleepDown's completed-recording cache remains an invalidation
+optimization and does not change the effect sequence. `Sample.SharedDirect` identifies direct
+sampling in diagnostic builds. Matching the base path does not imply identical appearance or
+measured frame time once SleepDown decorations are enabled.
 
 The shared layer keeps its RenderEffect attached: recording drawLayer is a display-list reference,
 not a pixel bake. Sampling applies inverse consumer transform, full-resolution source offset, then
-texture upscaling; placing texture upscaling before offset doubles the displacement at 0.5 scale.
+texture upscaling in the generic path. The matching direct path translates by the source offset
+times 0.48 in sampled pixels, then expands only the final card buffer.
 
 Course cards now use node-internal sampling buffers, following Nexio's full-size layout approach.
 `BackdropRenderOptions.sampleScale` scales only the sampling buffer and effect density/geometry;

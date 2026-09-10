@@ -29,7 +29,7 @@ import com.kyant.backdrop.effects.blur
 import com.kyant.backdrop.effects.vibrancy
 import com.kyant.backdrop.internal.BackdropRecordingCache
 import com.kyant.backdrop.internal.InverseLayerScope
-import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 /**
  * One blurred wallpaper prefix shared by all course cards; consumers retain their own lens.
@@ -69,7 +69,7 @@ class SharedBlurBackdrop(val source: LayerBackdrop, val radiusPx: Float, val vib
 }
 
 /** Fixed sampling ratio for the shared prefix; blur radius is scaled by the same factor. */
-private const val SharedBlurSampleScale = 0.5f
+const val SharedBlurSampleScale = 0.48f
 
 private data class RecorderElement(val backdrop: SharedBlurBackdrop, val sourceKey: () -> Any?) : ModifierNodeElement<RecorderNode>() {
     override fun create() = RecorderNode(backdrop, sourceKey)
@@ -107,8 +107,8 @@ private class RecorderNode(var backdrop: SharedBlurBackdrop, var sourceKey: () -
         val fullSize = size.toIntSize()
         if (fullSize.width <= 0 || fullSize.height <= 0) return
         val sampled = IntSize(
-            width = ceil(fullSize.width * SharedBlurSampleScale).toInt().coerceAtLeast(1),
-            height = ceil(fullSize.height * SharedBlurSampleScale).toInt().coerceAtLeast(1)
+            width = (fullSize.width * SharedBlurSampleScale).roundToInt().coerceAtLeast(1),
+            height = (fullSize.height * SharedBlurSampleScale).roundToInt().coerceAtLeast(1)
         )
         val sourceDirty = cache.needsRecord(key, fullSize, density, fontScale, layoutDirection)
         val effectDirty = lastRadius != backdrop.radiusPx || lastVibrant != backdrop.vibrant

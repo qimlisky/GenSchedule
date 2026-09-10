@@ -28,4 +28,19 @@ class SampledEffectGeometryTest {
         assertEquals(drawScope.size, effect.size)
         assertEquals(36f, with(effect) { 12.dp.toPx() })
     }
+
+    @Test
+    fun sharedCourseSamplingKeepsFractionalLensGeometryAtNexioResolution() {
+        val drawScope = object : DrawScope by CanvasDrawScope() {
+            override val density = 3f
+            override val size = Size(201f, 405f)
+        }
+        val effect = object : BackdropEffectScopeImpl() { override val shape = RectangleShape }
+        val scale = com.kyant.backdrop.backdrops.SharedBlurSampleScale
+        assertEquals(0.48f, scale)
+        effect.update(drawScope, drawScope.size * scale, densityScale = scale)
+        assertEquals(96.48f, effect.size.width, 0.001f)
+        assertEquals(194.4f, effect.size.height, 0.001f)
+        assertEquals(17.28f, with(effect) { 12.dp.toPx() }, 0.001f)
+    }
 }

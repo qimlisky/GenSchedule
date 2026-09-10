@@ -756,8 +756,9 @@ internal fun courseCardGlassEffectFrame(
         tokens.lensAmount * quality * (if (hasWallpaper) 1f else 1.35f) *
             lensShapeFactor
     },
-    useVibrancy = tokens.useVibrancy,
-    depthEffect = tokens.depthEffect,
+    // Match Nexio's blur -> lens base; SleepDown tint, outline light and shadows follow it.
+    useVibrancy = false,
+    depthEffect = false,
     chromaticAberration = tokens.chromaticAberration,
     highlight = GlassHighlightFrame(
         style = GlassHighlightStyle.Default,
@@ -1162,7 +1163,11 @@ fun CourseGlassCard(
                         material = tokens,
                         shape = { shape },
                         effectFrame = cardEffects,
-                        backdropSampleScale = if (morphAllocation == null) activeBackdropSampleScale else 1f,
+                        backdropSampleScale = when {
+                            morphAllocation != null -> 1f
+                            useSharedWallpaper -> com.kyant.backdrop.backdrops.SharedBlurSampleScale
+                            else -> activeBackdropSampleScale
+                        },
                         cacheDecorations = morphAllocation == null,
                         renderEnabled = { drawMaterialNodes },
                         renderBounds = { morphAllocation?.localBounds() },

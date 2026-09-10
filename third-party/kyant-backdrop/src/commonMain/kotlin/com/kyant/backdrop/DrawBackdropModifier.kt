@@ -34,6 +34,9 @@ import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.backdrops.SharedBlurBackdrop
+import androidx.compose.ui.layout.positionInWindow
+import kotlin.math.roundToInt
 import com.kyant.backdrop.highlight.Highlight
 import com.kyant.backdrop.highlight.HighlightElement
 import com.kyant.backdrop.internal.ShapeProvider
@@ -305,16 +308,48 @@ private class DrawBackdropNode(
             val allocationPadding = shapeProvider.options.allocationPadding ?: padding
             require(allocationPadding >= padding) { "Fixed allocation must cover effect padding" }
 
-            recordLayer(
-                layer,
-                size = IntSize(
-                    if (sampleScale == 1f) size.width.toInt() + allocationPadding.toInt() * 2
-                    else ceil(size.width * sampleScale + allocationPadding * 2).toInt(),
-                    if (sampleScale == 1f) size.height.toInt() + allocationPadding.toInt() * 2
-                    else ceil(size.height * sampleScale + allocationPadding * 2).toInt()
-                ),
-                block = recordBackdropBlock
-            )
+            val shared = backdrop as? SharedBlurBackdrop
+            val sharedLayer = shared?.layer
+            val sourceCoordinates = shared?.source?.layerCoordinates
+            val cardCoordinates = layoutCoordinates
+            val directSharedSample = sharedLayer != null && shared?.sampleScale == sampleScale &&
+                sourceCoordinates?.isAttached == true && cardCoordinates?.isAttached == true &&
+                layerBlock == null && shapeProvider.options.bounds() == null && exportedBackdrop == null
+            if (directSharedSample) {
+                // Nexio 2971759: shared wallpaper and card buffer use the same resolution.
+                // Translate directly in sampled pixels, then apply this card's lens. Avoid the
+                // expand-source -> shrink-consumer pair used by the generic Backdrop interface.
+                val source = checkNotNull(sourceCoordinates)
+                val card = checkNotNull(cardCoordinates)
+                val offset = try { source.localPositionOf(card) } catch (_: IllegalArgumentException) {
+                    card.positionInWindow() - source.positionInWindow()
+                }
+                recordLayer(
+                    layer,
+                    size = IntSize(
+                        (size.width * sampleScale + allocationPadding * 2).roundToInt().coerceAtLeast(1),
+                        (size.height * sampleScale + allocationPadding * 2).roundToInt().coerceAtLeast(1)
+                    )
+                ) {
+                    val canvas = drawContext.canvas
+                    canvas.save()
+                    canvas.translate(-offset.x * sampleScale + padding, -offset.y * sampleScale + padding)
+                    onDrawBackdrop { drawLayer(checkNotNull(sharedLayer)) }
+                    canvas.restore()
+                }
+                BackdropDiagnostics.event("Sample.SharedDirect")
+            } else {
+                recordLayer(
+                    layer,
+                    size = IntSize(
+                        if (sampleScale == 1f) size.width.toInt() + allocationPadding.toInt() * 2
+                        else ceil(size.width * sampleScale + allocationPadding * 2).toInt(),
+                        if (sampleScale == 1f) size.height.toInt() + allocationPadding.toInt() * 2
+                        else ceil(size.height * sampleScale + allocationPadding * 2).toInt()
+                    ),
+                    block = recordBackdropBlock
+                )
+            }
 
             layer.topLeft = IntOffset.Zero
             layerDiagnostics.recorded(layer.size)
@@ -415,7 +450,8 @@ private class DrawBackdropNode(
         lastEffectKey = effectKey
         lastEffectShape = effectShape
         BackdropDiagnostics.event("Sample.EffectRebuilt")
-        graphicsLayer?.renderEffect = effectScope.renderEffect
+        val effect = effectScope.renderEffect
+        if (graphicsLayer?.renderEffect != effect) graphicsLayer?.renderEffect = effect
         padding = effectScope.padding
     }
 
