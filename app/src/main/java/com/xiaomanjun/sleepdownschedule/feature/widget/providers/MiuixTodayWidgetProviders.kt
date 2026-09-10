@@ -506,10 +506,17 @@ internal object MiuixTodayWidgetRenderer {
                 val preview = RemoteViews(context.packageName, R.layout.widget_preview_today_courses).apply {
                     setImageViewResource(R.id.widget_app_icon, iconResId)
                 }
+                // Generated previews are measured without an installed widget's host bounds.
+                // Publish the same intrinsic 4x2 size as the XML/settings preview so a launcher
+                // need not infer a size from match-parent containers and weighted rows.
+                val previewSize = canonicalWidgetPreviewSize(WidgetAppearanceVariant.COURSES_LARGE)
+                val sizedPreview = RemoteViews(mapOf(
+                    SizeF(previewSize.widthDp.toFloat(), previewSize.heightDp.toFloat()) to preview
+                ))
                 if (manager.setWidgetPreview(
                         ComponentName(context, TodayCoursesWidgetProvider::class.java),
                         android.appwidget.AppWidgetProviderInfo.WIDGET_CATEGORY_HOME_SCREEN,
-                        preview
+                        sizedPreview
                     )) {
                     publishedPreviewIconResId = iconResId
                 }

@@ -19,6 +19,7 @@ import android.view.ViewGroup
 import android.content.ComponentName
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Bundle
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -64,6 +65,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
@@ -160,6 +162,9 @@ fun WidgetCustomizationScreen(
         derivedStateOf { pagerState.settledPage.coerceIn(widgetTypes.indices) }
     }
     val selectedType = widgetTypes[selectedPage]
+    // Reuse the exact rendered previews already displayed by the pager. A pin request without
+    // EXTRA_APPWIDGET_PREVIEW can produce an empty confirmation sheet on the current launcher.
+    val widgetPreviews = remember { mutableStateMapOf<WidgetAppearanceVariant, RemoteViews>() }
 
     suspend fun reload() {
         appearances = repository.all()
@@ -317,7 +322,8 @@ fun WidgetCustomizationScreen(
                                         useParentSize = true,
                                         onBoundsChanged = {
                                             if (page == pagerState.currentPage) currentPreviewBounds = it
-                                        }
+                                        },
+                                        onRemoteViewsReady = { widgetPreviews[type] = it }
                                     )
                                 }
                                 Spacer(Modifier.height(8.dp))
@@ -329,17 +335,26 @@ fun WidgetCustomizationScreen(
                         pagerState = pagerState,
                         pageCount = widgetTypes.size
                     )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                     LiquidMenuButton(
                         backdrop = backdrop,
-                        label = "添加到桌面",
+                        label = if (widgetPreviews[selectedType] == null) "加载预览…" else "添加到桌面",
                         onClick = {
+                            val preview = widgetPreviews[selectedType] ?: return@LiquidMenuButton
+                            val extras = Bundle().apply {
+                                putParcelable(AppWidgetManager.EXTRA_APPWIDGET_PREVIEW, preview)
+                            }
                             val requested = manager.isRequestPinAppWidgetSupported &&
-                                manager.requestPinAppWidget(providerComponent(selectedType), null, null)
+                                manager.requestPinAppWidget(providerComponent(selectedType), extras, null)
                             if (!requested) {
                                 Toast.makeText(context, "当前桌面不支持直接添加，请在桌面长按空白处添加小组件", Toast.LENGTH_LONG).show()
                             }
                         },
-                        modifier = Modifier.width(132.dp),
+                        modifier = Modifier.weight(1f),
                         textColorOverride = Color.White,
                         surfaceColorOverride = Color(0xFF0A84FF).copy(alpha = 0.72f)
                     )
@@ -354,7 +369,7 @@ fun WidgetCustomizationScreen(
                                 currentPreviewBounds
                             )
                         },
-                        modifier = Modifier.width(132.dp),
+                        modifier = Modifier.weight(1f),
                         textColorOverride = if (darkPage) Color.White else Color.Black,
                         surfaceColorOverride = if (darkPage) {
                             Color(0xFF4A4A4F).copy(alpha = 0.72f)
@@ -362,6 +377,7 @@ fun WidgetCustomizationScreen(
                             Color.White.copy(alpha = 0.74f)
                         }
                     )
+                    }
                 }
             }
             item {
@@ -567,12 +583,14 @@ private fun WidgetRemoteViewsPreview(
     useParentSize: Boolean = false,
     transparentBackground: Boolean = false,
     onBoundsChanged: (Rect) -> Unit = {},
-    onReady: () -> Unit = {}
+    onReady: () -> Unit = {},
+    onRemoteViewsReady: (RemoteViews) -> Unit = {}
 ) {
     val context = LocalContext.current
     val renderSize = remember(type) { canonicalWidgetPreviewSize(type) }
     var remoteViews by remember(type) { mutableStateOf<RemoteViews?>(null) }
     val latestOnReady = rememberUpdatedState(onReady)
+    val latestOnRemoteViewsReady = rememberUpdatedState(onRemoteViewsReady)
     LaunchedEffect(type, appearance, state, transparentBackground) {
         // Slider/crop gestures can emit dozens of appearance snapshots per second. Keep the
         // last valid preview on screen and collapse that burst into one expensive bitmap pass.
@@ -649,6 +667,7 @@ private fun WidgetRemoteViewsPreview(
         rendered.exceptionOrNull()?.let { if (it is CancellationException) throw it }
         rendered.onSuccess { (views, _) ->
             remoteViews = views
+            latestOnRemoteViewsReady.value(views)
             latestOnReady.value()
         }.onFailure {
             android.util.Log.e("WidgetPreview", "Failed to render ${type.key} preview", it)
