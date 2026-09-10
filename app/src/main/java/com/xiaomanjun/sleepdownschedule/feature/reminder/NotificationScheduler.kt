@@ -1,6 +1,7 @@
 package com.xiaomanjun.sleepdownschedule.feature.reminder
 
 import com.xiaomanjun.sleepdownschedule.*
+import com.xiaomanjun.sleepdownschedule.domain.schedule.courseReminderSessions
 
 import android.Manifest
 import android.annotation.SuppressLint
@@ -127,7 +128,7 @@ object NotificationScheduler {
         (0L..SCHEDULE_HORIZON_DAYS).forEach { dayOffset ->
             val scheduleDate = today.plusDays(dayOffset)
             val dayCourses = coursesForDate(state, scheduleDate)
-            dayCourses.forEach { course ->
+            dayCourses.flatMap { courseReminderSessions(it, periods) }.forEach { course ->
                 val payload = coursePayload(
                     date = scheduleDate,
                     course = course,
@@ -150,7 +151,7 @@ object NotificationScheduler {
                             context = context,
                             alarmManager = alarmManager,
                             trigger = trigger,
-                            requestCode = eventRequestCode(scheduleDate, course.id, index, EVENT_COURSE),
+                            requestCode = eventRequestCode(scheduleDate, course.id, index, "$EVENT_COURSE:$firstStart"),
                             payload = payload,
                             config = config,
                             event = EVENT_COURSE,
@@ -168,7 +169,7 @@ object NotificationScheduler {
                                 context = context,
                                 alarmManager = alarmManager,
                                 trigger = trigger,
-                                requestCode = eventRequestCode(scheduleDate, course.id, 20 + index, EVENT_COURSE),
+                                requestCode = eventRequestCode(scheduleDate, course.id, 20 + index, "$EVENT_COURSE:$firstStart"),
                                 payload = payload,
                                 config = config,
                                 event = EVENT_COURSE,
@@ -251,11 +252,14 @@ object NotificationScheduler {
                     it.weekday,
                     it.periods.joinToString(","),
                     it.weeks.joinToString(","),
+                    it.customStartTime.orEmpty(),
+                    it.customEndTime.orEmpty(),
                     it.weekParity.name
                 ).joinToString(":")
             }
         val periodPart = periods.joinToString(";") { "${it.periodIndex},${it.startTime},${it.endTime}" }
         return listOf(
+            "continuous-course-sessions-v2",
             today.toString(),
             config.totalWeeks,
             config.currentWeek,
@@ -324,14 +328,9 @@ object NotificationScheduler {
         val state = AppState(courses = courses, config = config, periods = periods)
         val preferences = LiveUpdatePreferences.read(context)
         val activePayload = coursesForDate(state, today)
+            .flatMap { courseReminderSessions(it, periods) }
             .mapNotNull { course -> coursePayload(today, course, config, periods, preferences, zone) }
-            .firstOrNull { payload ->
-                val start = payload.startAtMillis() ?: return@firstOrNull false
-                val end = payload.endAtMillis() ?: start
-                val visibleEnd = if (preferences.duringClassEnabled) end else start
-                nowMillis >= start - config.notificationLeadMinutes.coerceAtLeast(0) * 60_000L &&
-                    nowMillis < visibleEnd
-            }
+            .let { selectImmediateCoursePayload(it, nowMillis, config.notificationLeadMinutes) }
             ?: immediateTomorrowPayload(
                 state = state,
                 periods = periods,
@@ -351,13 +350,28 @@ object NotificationScheduler {
             stopLiveUpdateService(context)
             return
         }
-        Log.d(
-            TAG,
-            "start immediate live update: kind=${activePayload.kind}, name=${activePayload.name}, " +
-                "chip=${activePayload.chipTextMode}, actions=${activePayload.showActions}"
-        )
         startLiveUpdateService(context, activePayload)
     }
+
+    internal fun selectImmediateCoursePayload(
+        payloads: List<LiveUpdatePayload>,
+        nowMillis: Long,
+        leadMinutes: Int
+    ): LiveUpdatePayload? = payloads
+            .filter { payload ->
+                val start = payload.startAtMillis() ?: return@filter false
+                val end = payload.endAtMillis() ?: start
+                val visibleEnd = if (payload.duringClassEnabled) end else start
+                nowMillis >= start - leadMinutes.coerceAtLeast(0) * 60_000L &&
+                    nowMillis < visibleEnd
+            }
+            .minWithOrNull(compareBy<LiveUpdatePayload> {
+                when {
+                    it.segments.any { segment -> nowMillis >= segment.startAtMillis && nowMillis < segment.endAtMillis } -> 0
+                    nowMillis < (it.startAtMillis() ?: Long.MAX_VALUE) -> 1
+                    else -> 2
+                }
+            }.thenBy { it.startAtMillis() })
 
     private fun cancelPreviouslyScheduled(context: Context, alarmManager: AlarmManager) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)

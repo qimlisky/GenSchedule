@@ -40,6 +40,21 @@ class CourseAlarmReceiver : BroadcastReceiver() {
             val location = payload?.location ?: intent.getStringExtra("location").orEmpty()
             val timeText = payload?.timeText ?: intent.getStringExtra("timeText").orEmpty()
             val mode = runCatching { NotificationMode.valueOf(intent.getStringExtra("notificationMode") ?: NotificationMode.STANDARD.name) }.getOrDefault(NotificationMode.STANDARD)
+            if (mode == NotificationMode.LIVE_UPDATE && payload != null) {
+                // Alarm delivery order is not guaranteed. Re-select from current data so an older
+                // session's end/retry cannot replace or cancel the course that is now in class.
+                val pending = goAsync()
+                val app = context.applicationContext as CourseScheduleApp
+                app.applicationScope.launch(Dispatchers.IO) {
+                    try {
+                        val snapshot = app.repository.activeSnapshot()
+                        NotificationScheduler.checkImmediateLiveUpdate(app, snapshot.courses, snapshot.config, snapshot.periods)
+                    } finally {
+                        pending.finish()
+                    }
+                }
+                return@withShortWakeLock
+            }
             val startTime = runCatching { LocalTime.parse(timeText.substringBefore("-").trim()) }.getOrNull()
             if (
                 mode == NotificationMode.LIVE_UPDATE &&

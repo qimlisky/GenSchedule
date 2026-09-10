@@ -1,5 +1,7 @@
 package com.xiaomanjun.sleepdownschedule.feature.home.week
 
+import com.xiaomanjun.sleepdownschedule.domain.schedule.courseNeedsSupplementaryWeekRow
+
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.drawContinuousRoundRect
 
 import com.xiaomanjun.sleepdownschedule.app.ui.*
@@ -367,6 +369,14 @@ internal fun SinglePillWeekScheduleScreen(
         weekCourseBuckets(state.courses, displayWeek)
     }
     val visibleCourses = weekBuckets.visibleCourses
+    val supplementaryRowCount = remember(state.courses, state.periods, displayWeek) {
+        (displayWeek - 1..displayWeek + 1).maxOf { week ->
+            weekCourseBuckets(state.courses, week).visibleCourses
+                .filter { courseNeedsSupplementaryWeekRow(it, state.periods) }
+                .groupingBy { it.weekday }.eachCount().values.maxOrNull() ?: 0
+        }
+    }
+    val supplementaryHeight = if (supplementaryRowCount > 0) 24.dp + 88.dp * supplementaryRowCount else 0.dp
     val weekdays = remember(weekBuckets, state.config.hideEmptyWeekends) {
         visibleWeekdaysForBuckets(weekBuckets, state.config.hideEmptyWeekends)
     }
@@ -549,7 +559,8 @@ internal fun SinglePillWeekScheduleScreen(
     // previous top-only gutter protected the first-row delete pill but left the last-row card
     // and resize handle inside the pager's clip boundary, so the final grid cell could neither
     // be reached reliably nor be shown completely during the edit-mode entrance frame.
-    val editControlOverflow = if (retainEditControlOverflow) 12.dp else 0.dp
+    // Includes the badge's glass shadow and entrance overshoot, not just its 4dp offset.
+    val editControlOverflow = if (retainEditControlOverflow) 24.dp else 0.dp
     LaunchedEffect(state.config.id, displayWeek, weekEditMode) {
         if (!weekEditMode) weekEditOverlay.clear()
     }
@@ -660,7 +671,7 @@ internal fun SinglePillWeekScheduleScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(cardHeight * state.periods.size + editControlOverflow)
+                        .height(cardHeight * state.periods.size + supplementaryHeight + editControlOverflow)
                         .then(if (retainEditControlOverflow) Modifier else Modifier.clipToBounds())
                 ) {
                     Column(
@@ -775,7 +786,7 @@ internal fun SinglePillWeekScheduleScreen(
                             modifier = Modifier
                                 .offset(y = -editControlOverflow)
                                 .fillMaxWidth()
-                                .height(cardHeight * state.periods.size + editControlOverflow * 2f),
+                                .height(cardHeight * state.periods.size + supplementaryHeight + editControlOverflow * 2f),
                             userScrollEnabled = !weekEditMode,
                             // Keep the pager topology stable while a home overlay opens/closes.
                             // Disposing the adjacent week at the exact frame Personalization
@@ -801,6 +812,7 @@ internal fun SinglePillWeekScheduleScreen(
                                     end = weekGridEndPadding
                                 ),
                                 courses = pageCourses,
+                                showSupplementaryRows = supplementaryRowCount > 0,
                                 weekdays = pageWeekdays,
                                 periods = state.periods,
                                 cardHeight = cardHeight,
@@ -1077,6 +1089,7 @@ private fun WeekEditOverlayHost(
             if (req.mode == WeekEditOverlayMode.Resize) {
                 WeekResizeCornerHandle(
                     config = config,
+                    backdrop = backdrop,
                     selected = true,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -1255,6 +1268,7 @@ internal fun WeekCourseOverlayCardContent(course: CourseEntity, config: Schedule
 @Composable
 private fun WeekResizeCornerHandle(
     config: ScheduleConfigEntity,
+    backdrop: Backdrop?,
     selected: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -1272,13 +1286,26 @@ private fun WeekResizeCornerHandle(
         },
         contentAlignment = Alignment.BottomEnd
     ) {
-        Canvas(modifier = Modifier.size(18.dp)) {
-            val strokeWidth = 7.5.dp.toPx()
+        GlassSurface(
+            backdrop = backdrop,
+            config = config,
+            modifier = Modifier.size(22.dp),
+            shape = Capsule(),
+            tokens = GlassTokens.pill(intensity = 0.82f).copy(
+                surfaceAlpha = 0.36f,
+                shadowAlpha = 0.18f,
+                innerShadowAlpha = 0.14f
+            ),
+            selected = true,
+            onClick = null
+        ) {
+        Canvas(modifier = Modifier.align(Alignment.Center).size(12.dp)) {
+            val strokeWidth = 2.dp.toPx()
             val halfStroke = strokeWidth / 2f
             val right = size.width - halfStroke
             val bottom = size.height - halfStroke
-            val radius = 9.dp.toPx()
-            val arm = 3.5.dp.toPx()
+            val radius = 6.dp.toPx()
+            val arm = 3.dp.toPx()
             val path = androidx.compose.ui.graphics.Path().apply {
                 moveTo(right, (bottom - radius - arm).coerceAtLeast(halfStroke))
                 cubicTo(
@@ -1296,6 +1323,7 @@ private fun WeekResizeCornerHandle(
                 color = handleColor,
                 style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
             )
+        }
         }
     }
 }
@@ -1867,6 +1895,7 @@ fun WeekDayColumn(
 fun WeekCourseColumnsLayer(
     modifier: Modifier = Modifier,
     courses: List<CourseEntity>,
+    showSupplementaryRows: Boolean = false,
     weekdays: List<Int>,
     periods: List<PeriodEntity>,
     cardHeight: Dp,
@@ -1899,7 +1928,13 @@ fun WeekCourseColumnsLayer(
     onCourseClick: (CourseEntity, Rect?) -> Unit
 ) {
     val density = LocalDensity.current
-    val coursesByWeekday = remember(courses) { courses.groupBy { it.weekday } }
+    val supplementaryCoursesByDay = remember(courses, periods) {
+        courses.filter { courseNeedsSupplementaryWeekRow(it, periods) }
+            .sortedBy { it.customStartTime }.groupBy { it.weekday }
+    }
+    val coursesByWeekday = remember(courses, periods) {
+        courses.filterNot { courseNeedsSupplementaryWeekRow(it, periods) }.groupBy { it.weekday }
+    }
     val periodIndexes = remember(periods) { periods.map { it.periodIndex } }
     val renderedSegmentsByDay = remember(
         coursesByWeekday,
@@ -2006,6 +2041,36 @@ fun WeekCourseColumnsLayer(
                         onFinishResizeOverlay = onFinishResizeOverlay,
                         onCancelWeekEditOverlay = onCancelWeekEditOverlay
                     )
+                    if (showSupplementaryRows) {
+                        Text(
+                            text = if (columnIndex == 0) "其他时间" else "",
+                            modifier = Modifier.height(24.dp).padding(top = 5.dp),
+                            color = glassForegroundColor(config),
+                            fontSize = 9.sp,
+                            maxLines = 1
+                        )
+                        supplementaryCoursesByDay[day].orEmpty().forEachIndexed { index, course ->
+                            Column(
+                                modifier = Modifier.fillMaxWidth().height(88.dp).padding(horizontal = 2.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(course.customStartTime.orEmpty(), fontSize = 8.sp, lineHeight = 10.sp,
+                                    color = glassForegroundColor(config), modifier = Modifier.height(12.dp))
+                                WeekCourseBlock(
+                                    course = course, periods = periods, height = 64.dp,
+                                    cardColor = cardColor, backdrop = backdrop, floatingBackdrop = floatingBackdrop,
+                                    config = config, dayIndex = day, gridColumnWidth = dayColumnWidth,
+                                    stackIndex = index, editMode = editMode, editWeek = editWeek,
+                                    allWeekCourses = allWeekCourses, editScrollState = editScrollState,
+                                    onEnterEditMode = onEnterEditMode,
+                                    onDeleteSingleWeekCourse = onDeleteSingleWeekCourse,
+                                    onCourseClick = onCourseClick
+                                )
+                                Text(course.customEndTime.orEmpty(), fontSize = 8.sp, lineHeight = 10.sp,
+                                    color = glassForegroundColor(config), modifier = Modifier.height(12.dp))
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -3665,6 +3730,7 @@ fun WeekCourseBlock(
             fun renderResizeHandle(modifier: Modifier) {
                 WeekResizeCornerHandle(
                     config = config,
+                    backdrop = activeCardBackdrop,
                     selected = handleDragging,
                     modifier = modifier.then(resizeHandleModifier)
                 )
