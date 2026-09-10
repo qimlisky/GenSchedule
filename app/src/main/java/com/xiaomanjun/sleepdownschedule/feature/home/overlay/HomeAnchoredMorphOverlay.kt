@@ -2455,7 +2455,8 @@ internal fun HomeAddMenuMorphPanel(
     shape: Shape,
     modifier: Modifier,
     showModeSwitch: Boolean = true,
-    actionItemHeight: Dp = HomeAddMenuActionItemHeightDp.dp
+    actionItemHeight: Dp = HomeAddMenuActionItemHeightDp.dp,
+    compactActions: Boolean = false
 ) {
     var highlightedIndex by remember { mutableIntStateOf(-1) }
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -2463,7 +2464,8 @@ internal fun HomeAddMenuMorphPanel(
     val itemStepPx = with(density) {
         (actionItemHeight + HomeAddMenuActionGapDp.dp).toPx()
     }
-    val contentTopPaddingPx = with(density) { HomeAddMenuContentTopPaddingDp.dp.toPx() }
+    val contentTopPadding = if (compactActions) 7.dp else HomeAddMenuContentTopPaddingDp.dp
+    val contentTopPaddingPx = with(density) { contentTopPadding.toPx() }
     val modeHeightPx = with(density) { if (showModeSwitch) HomeAddMenuModeHeightDp.dp.toPx() else 0f }
     val actionTopPx = with(density) {
         if (!showModeSwitch) 0f else (
@@ -2491,7 +2493,7 @@ internal fun HomeAddMenuMorphPanel(
     }
 
     val unifiedMenuGestureModifier = if (interactive) {
-        Modifier.pointerInput(actions, homeMode, showModeSwitch, actionItemHeight) {
+        Modifier.pointerInput(actions, homeMode, showModeSwitch, actionItemHeight, compactActions) {
             awaitEachGesture {
                 val down = awaitFirstDown(
                     requireUnconsumed = false,
@@ -2601,10 +2603,10 @@ internal fun HomeAddMenuMorphPanel(
                     }
                 }
                 .padding(
-                    start = (HomeAddMenuConcentricInsetDp - HomeAddMenuActionColumnInsetDp).dp,
-                    top = HomeAddMenuContentTopPaddingDp.dp,
-                    end = (HomeAddMenuConcentricInsetDp - HomeAddMenuActionColumnInsetDp).dp,
-                    bottom = (HomeAddMenuConcentricInsetDp - HomeAddMenuSelectionVerticalInsetDp).dp
+                    start = if (compactActions) 6.dp else (HomeAddMenuConcentricInsetDp - HomeAddMenuActionColumnInsetDp).dp,
+                    top = contentTopPadding,
+                    end = if (compactActions) 6.dp else (HomeAddMenuConcentricInsetDp - HomeAddMenuActionColumnInsetDp).dp,
+                    bottom = if (compactActions) 7.dp else (HomeAddMenuConcentricInsetDp - HomeAddMenuSelectionVerticalInsetDp).dp
                 )
                 .then(unifiedMenuGestureModifier)
         ) {
@@ -2641,6 +2643,7 @@ internal fun HomeAddMenuMorphPanel(
                             config = config,
                             action = action,
                             itemHeight = actionItemHeight,
+                            compactCapsule = compactActions,
                             modifier = if (!showModeSwitch) Modifier.semantics(mergeDescendants = true) {
                                 onClick(action.label) {
                                     if (interactive) action.onClick()
@@ -2677,7 +2680,7 @@ internal fun HomeAddMenuMorphPanel(
                     lensHeight = 12.dp,
                     lensAmount = 24.dp,
                     shadowEnabled = true,
-                    pressExpansion = 3.dp,
+                    pressExpansion = if (compactActions) 1.5.dp else 3.dp,
                     highlightRadiusMultiplier = 0.65f,
                     shape = shape,
                     surfaceColor = (

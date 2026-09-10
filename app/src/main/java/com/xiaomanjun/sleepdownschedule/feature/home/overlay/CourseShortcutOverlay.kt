@@ -68,15 +68,15 @@ internal class CourseShortcutController(private val scope: CoroutineScope) {
             progress.snapTo(0f)
             cardScale.snapTo(1f)
             launch {
-                cardScale.animateTo(1.04f, keyframes {
+                cardScale.animateTo(1.015f, keyframes {
                     durationMillis = 300
                     1f at 0
-                    0.96f at 85 using FastOutSlowInEasing
-                    1.055f at 220 using FastOutSlowInEasing
-                    1.04f at 300
+                    0.98f at 85 using FastOutSlowInEasing
+                    1.02f at 220 using FastOutSlowInEasing
+                    1.015f at 300
                 })
             }
-            progress.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 380f))
+            progress.animateTo(1f, spring(dampingRatio = 0.9f, stiffness = 380f))
         }
     }
 
@@ -185,8 +185,9 @@ internal fun CourseShortcutOverlay(
             val source = request.bounds.translate(-host.topLeft)
             val rowHeight = 48.dp * density.fontScale.coerceAtLeast(1f)
             val placement = with(density) {
-                courseShortcutPlacement(source, available, (220.dp * density.fontScale.coerceAtLeast(1f)).toPx(),
-                    (rowHeight * 2f + 12.dp).toPx(), 12.dp.toPx())
+                val readableWidth = (60.dp + 28.dp * density.fontScale.coerceAtLeast(1f)).toPx()
+                courseShortcutPlacement(source, available, maxOf(source.width + 24.dp.toPx(), readableWidth),
+                    (rowHeight * 2f + 14.dp).toPx(), 10.dp.toPx())
             }
             Box(
                 Modifier.offset { IntOffset(source.left.roundToInt(), source.top.roundToInt()) }
@@ -205,11 +206,11 @@ internal fun CourseShortcutOverlay(
             }
             val actions = remember(request, controller) {
                 listOf(
-                    AddMenuAction(R.drawable.ic_edit, "进入编辑模式") {
+                    AddMenuAction(R.drawable.ic_edit, "编辑") {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.close(request.enterEditMode)
                     },
-                    AddMenuAction(R.drawable.ic_add_course, "复制课程") {
+                    AddMenuAction(R.drawable.ic_add_course, "复制") {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.close { controller.copyRequest = request }
                     }
@@ -223,8 +224,9 @@ internal fun CourseShortcutOverlay(
                 surfaceAlphaProvider = { controller.progress.value.coerceIn(0f, 1f) },
                 contentAlphaProvider = { controller.progress.value.coerceIn(0f, 1f) },
                 interactive = !controller.closing,
-                shape = RoundedRectangle(25.dp),
-                showModeSwitch = false, actionItemHeight = rowHeight,
+                // Inner capsule radius = (rowHeight - 2dp) / 2, with an equal 8dp inset.
+                shape = RoundedRectangle(rowHeight / 2 + 7.dp),
+                showModeSwitch = false, actionItemHeight = rowHeight, compactActions = true,
                 modifier = Modifier
                     .offset { IntOffset(target.left.roundToInt(), target.top.roundToInt()) }
                     .size(with(density) { target.width.toDp() }, with(density) { target.height.toDp() })
@@ -236,7 +238,7 @@ internal fun CourseShortcutOverlay(
                         translationX = (source.left + source.width * placement.pivotX -
                             target.left - target.width * placement.pivotX) * (1f - progress)
                         translationY = (source.top - target.bottom) * (1f - progress)
-                        rotationZ = (placement.pivotX - 0.5f) * 12f * (1f - progress)
+                        rotationZ = (placement.pivotX - 0.5f) * 6f * (1f - progress)
                     }
             )
         }
