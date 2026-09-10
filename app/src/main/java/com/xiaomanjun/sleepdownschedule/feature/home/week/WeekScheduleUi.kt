@@ -1090,6 +1090,8 @@ private fun WeekEditOverlayHost(
                 WeekResizeCornerHandle(
                     config = config,
                     backdrop = backdrop,
+                    cardSize = androidx.compose.ui.unit.DpSize(widthDp, heightDp),
+                    cardCorner = cardCorner,
                     selected = true,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -1269,6 +1271,8 @@ internal fun WeekCourseOverlayCardContent(course: CourseEntity, config: Schedule
 private fun WeekResizeCornerHandle(
     config: ScheduleConfigEntity,
     backdrop: Backdrop?,
+    cardSize: androidx.compose.ui.unit.DpSize,
+    cardCorner: Dp,
     selected: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -1278,19 +1282,20 @@ private fun WeekResizeCornerHandle(
     } else {
         ComposeColor.White.copy(alpha = if (selected) 0.88f else 0.72f)
     }
+    val badgeSize = (cardCorner * 1.6f + 10.dp).coerceIn(18.dp, 40.dp)
+        .coerceAtMost(minOf(cardSize.width, cardSize.height) / 2f + 4.dp)
+    val handleShape = remember(cardSize, cardCorner, badgeSize) {
+        WeekResizeCornerShape(cardSize, cardCorner, badgeSize)
+    }
     Box(
-        modifier = modifier.graphicsLayer {
-            val scale = if (selected) 1.14f else 1f
-            scaleX = scale
-            scaleY = scale
-        },
+        modifier = modifier,
         contentAlignment = Alignment.BottomEnd
     ) {
         GlassSurface(
             backdrop = backdrop,
             config = config,
-            modifier = Modifier.size(22.dp),
-            shape = Capsule(),
+            modifier = Modifier.size(badgeSize),
+            shape = handleShape,
             tokens = GlassTokens.pill(intensity = 0.82f).copy(
                 surfaceAlpha = 0.36f,
                 shadowAlpha = 0.18f,
@@ -1299,31 +1304,7 @@ private fun WeekResizeCornerHandle(
             selected = true,
             onClick = null
         ) {
-        Canvas(modifier = Modifier.align(Alignment.Center).size(12.dp)) {
-            val strokeWidth = 2.dp.toPx()
-            val halfStroke = strokeWidth / 2f
-            val right = size.width - halfStroke
-            val bottom = size.height - halfStroke
-            val radius = 6.dp.toPx()
-            val arm = 3.dp.toPx()
-            val path = androidx.compose.ui.graphics.Path().apply {
-                moveTo(right, (bottom - radius - arm).coerceAtLeast(halfStroke))
-                cubicTo(
-                    right,
-                    bottom - radius * 0.35f,
-                    right - radius * 0.35f,
-                    bottom,
-                    right - radius,
-                    bottom
-                )
-                lineTo((right - radius - arm).coerceAtLeast(halfStroke), bottom)
-            }
-            drawPath(
-                path = path,
-                color = handleColor,
-                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-            )
-        }
+            Box(Modifier.fillMaxSize().background(handleColor.copy(alpha = if (selected) 0.28f else 0.16f), handleShape))
         }
     }
 }
@@ -1774,8 +1755,11 @@ fun WeekDayColumn(
             .fillMaxWidth()
             .height(cardHeight * periods.size.toFloat())
     ) {
-        Column(Modifier.fillMaxSize()) {
-            periods.forEach { EmptyWeekCell(cardHeight, emptyBackground) }
+        val measuredCardLayoutWidth = (maxWidth - 4.dp).coerceAtLeast(1.dp)
+        if (emptyBackground.alpha > 0f) {
+            Column(Modifier.fillMaxSize()) {
+                periods.forEach { EmptyWeekCell(cardHeight, emptyBackground) }
+            }
         }
         renderedSegments.forEach { rendered ->
             val groupIndex = rendered.groupIndex
@@ -1825,6 +1809,7 @@ fun WeekDayColumn(
                     dayIndex = dayIndex,
                     periodIndex = periodIndexes[segment.startPosition],
                     gridColumnWidth = gridColumnWidth,
+                    cardLayoutWidth = measuredCardLayoutWidth,
                     periodRowHeight = periodRowHeight,
                     layerOffset = layerOffset,
                     layerTravel = layerTravel,
@@ -2910,6 +2895,7 @@ fun WeekCourseBlock(
     dayIndex: Int = 1,
     periodIndex: Int = 1,
     gridColumnWidth: Dp = 0.dp,
+    cardLayoutWidth: Dp = (gridColumnWidth - 4.dp).coerceAtLeast(1.dp),
     periodRowHeight: Dp = height,
     layerOffset: Animatable<Float, AnimationVector1D>? = null,
     layerTravel: Float = 1f,
@@ -3405,10 +3391,12 @@ fun WeekCourseBlock(
                 sampledShape = sampledCardShape,
                 onClick = null
             ) {}
-            BoxWithConstraints(Modifier.fillMaxWidth().height(displayedHeight).clipToBounds()) {
+            // The day column already knows the measured width. Subcomposing every card again
+            // made a single prefetched page spend 17–24ms in measureAndLayout on the 120Hz phone.
+            Box(Modifier.fillMaxWidth().height(displayedHeight).clipToBounds()) {
             val density = LocalDensity.current
             val heightDp = displayedHeight.value
-            val widthDp = maxWidth.value
+            val widthDp = cardLayoutWidth.value
             val compact = heightDp < 78f
             val tiny = heightDp < 52f
             val verticalPadding = when {
@@ -3429,8 +3417,8 @@ fun WeekCourseBlock(
             val locationLineHeight = scaledCourseWeekText(if (tiny) 8.0.sp else if (compact) 8.6.sp else 9.3.sp)
             val teacherFont = scaledCourseWeekText(8.4.sp)
             val teacherLineHeight = scaledCourseWeekText(7.9.sp)
-            val contentWidthPx = with(density) { (maxWidth - horizontalPadding * 2f).coerceAtLeast(24.dp).toPx() }
-            val availableTextPx = with(density) { (maxHeight - verticalPadding * 2f).coerceAtLeast(0.dp).toPx() }
+            val contentWidthPx = with(density) { (cardLayoutWidth - horizontalPadding * 2f).coerceAtLeast(24.dp).toPx() }
+            val availableTextPx = with(density) { (displayedHeight - verticalPadding * 2f).coerceAtLeast(0.dp).toPx() }
 
             fun estimatedLines(text: String, fontSize: TextUnit): Int {
                 if (text.isBlank()) return 0
@@ -3731,6 +3719,8 @@ fun WeekCourseBlock(
                 WeekResizeCornerHandle(
                     config = config,
                     backdrop = activeCardBackdrop,
+                    cardSize = androidx.compose.ui.unit.DpSize(cardLayoutWidth, displayedHeight),
+                    cardCorner = cardCorner,
                     selected = handleDragging,
                     modifier = modifier.then(resizeHandleModifier)
                 )

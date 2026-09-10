@@ -2329,7 +2329,11 @@ fun CourseScheduleAppUi(
                     config = visualState.config,
                     backdrop = centeredDialogSceneBackdrop,
                     cardBackdrop = backgroundBackdrop,
-                    onCopy = { draft -> homeDialog = HomeDialog.EditCourse(null, copyDraft = draft) }
+                    onCopy = { draft -> homeDialog = HomeDialog.EditCourse(null, copyDraft = draft) },
+                    onRemove = { course, week ->
+                        pendingCourseGroupDelete = emptyList()
+                        homeDialog = HomeDialog.ApplyCourseDelete(course, week)
+                    }
                 )
                 // Overlay content is subcomposed by the host, not at its call site. Preserve the
                 // same Miuix/Glass CompositionLocals that wrapped the 1.1.5 host; otherwise sheet
@@ -2910,7 +2914,10 @@ fun CourseScheduleAppUi(
                                             pendingConflictWeeks = emptyList()
                                         }
                                     },
-                                     onDeleteCourseSingleWeek = viewModel::deleteCourseSingleWeek,
+                                     onDeleteCourseSingleWeek = { course, week ->
+                                         pendingCourseGroupDelete = emptyList()
+                                         homeDialog = HomeDialog.ApplyCourseDelete(course, week)
+                                     },
                                       weekEditInteractionEnabled = pickerState.phase is CustomizeUiState.Home,
                                       courseGlassOcclusionPhase = effectiveCourseGlassOcclusionPhase,
                                       courseGlassRestoredGroupKeys = courseGlassRestoredGroupKeys,
@@ -5314,23 +5321,19 @@ fun AddMenuLiquidItem(
                 .fillMaxWidth()
                 .height(itemHeight - 2.dp)
                 .clip(if (compactCapsule) Capsule() else RoundedRectangle(HomeAddMenuSelectionCornerDp.dp))
-                .background(when {
-                    highlighted -> selectedColor
-                    compactCapsule -> selectedColor.copy(alpha = selectedColor.alpha * 0.4f)
-                    else -> ComposeColor.Transparent
-                })
-                .padding(horizontal = if (compactCapsule) 6.dp else 16.dp),
+                .background(if (highlighted) selectedColor else ComposeColor.Transparent)
+                .padding(horizontal = if (compactCapsule) 14.dp else 16.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(if (compactCapsule) 4.dp else 10.dp)
+                horizontalArrangement = Arrangement.spacedBy(if (compactCapsule) 12.dp else 10.dp)
             ) {
                 Icon(
                     painterResource(action.iconRes),
                     contentDescription = null,
-                    modifier = Modifier.size(if (compactCapsule) 18.dp else 21.dp),
+                    modifier = Modifier.size(if (compactCapsule) 20.dp else 21.dp),
                     tint = baseText
                 )
                 Text(

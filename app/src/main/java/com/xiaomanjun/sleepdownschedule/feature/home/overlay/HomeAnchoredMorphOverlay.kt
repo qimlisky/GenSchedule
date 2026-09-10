@@ -2484,7 +2484,8 @@ internal fun HomeAddMenuMorphPanel(
         // Keep one continuous action hit region below the mode switch. The divider is decoration,
         // not a separate pointer target, and row spacing is assigned to the preceding row.
         return homeAddMenuHitIndex(
-            y = y - contentTopPaddingPx,
+            // Shortcut input is attached inside the padded content column.
+            y = y - if (compactActions) 0f else contentTopPaddingPx,
             modeHeight = modeHeightPx,
             actionTop = actionTopPx,
             actionStep = itemStepPx,

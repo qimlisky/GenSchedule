@@ -148,7 +148,8 @@ internal fun CourseShortcutOverlay(
     config: ScheduleConfigEntity,
     backdrop: Backdrop?,
     cardBackdrop: Backdrop?,
-    onCopy: (CourseEntity) -> Unit
+    onCopy: (CourseEntity) -> Unit,
+    onRemove: (CourseEntity, Int) -> Unit
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, controller) {
@@ -183,11 +184,11 @@ internal fun CourseShortcutOverlay(
                 )
             }
             val source = request.bounds.translate(-host.topLeft)
-            val rowHeight = 48.dp * density.fontScale.coerceAtLeast(1f)
+            val rowHeight = 44.dp * density.fontScale.coerceAtLeast(1f)
             val placement = with(density) {
-                val readableWidth = (60.dp + 28.dp * density.fontScale.coerceAtLeast(1f)).toPx()
-                courseShortcutPlacement(source, available, maxOf(source.width + 24.dp.toPx(), readableWidth),
-                    (rowHeight * 2f + 14.dp).toPx(), 10.dp.toPx())
+                val readableWidth = (120.dp + 64.dp * density.fontScale.coerceAtLeast(1f)).toPx()
+                courseShortcutPlacement(source, available, maxOf(source.width + 40.dp.toPx(), readableWidth),
+                    (rowHeight * 3f + 14.dp).toPx(), 10.dp.toPx())
             }
             Box(
                 Modifier.offset { IntOffset(source.left.roundToInt(), source.top.roundToInt()) }
@@ -204,15 +205,19 @@ internal fun CourseShortcutOverlay(
                     shape = RoundedRectangle(with(density) { request.cornerPx.toDp() }), onClick = null
                 ) { WeekCourseOverlayCardContent(request.course, config) }
             }
-            val actions = remember(request, controller) {
+            val actions = remember(request, controller, onRemove) {
                 listOf(
-                    AddMenuAction(R.drawable.ic_edit, "编辑") {
+                    AddMenuAction(R.drawable.ic_edit, "进入编辑") {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.close(request.enterEditMode)
                     },
-                    AddMenuAction(R.drawable.ic_add_course, "复制") {
+                    AddMenuAction(R.drawable.ic_add_course, "复制课程") {
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                         controller.close { controller.copyRequest = request }
+                    },
+                    AddMenuAction(R.drawable.ic_trash, "移除") {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        controller.close { onRemove(request.course, request.week) }
                     }
                 )
             }
