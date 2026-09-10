@@ -1,5 +1,7 @@
 package com.xiaomanjun.sleepdownschedule.feature.home.week
 
+import com.xiaomanjun.sleepdownschedule.domain.schedule.courseNeedsSupplementaryWeekRow
+
 import com.xiaomanjun.sleepdownschedule.core.ui.designsystem.drawContinuousRoundRect
 
 import com.xiaomanjun.sleepdownschedule.app.ui.*
@@ -8,6 +10,14 @@ import com.xiaomanjun.sleepdownschedule.glass.ui.*
 import com.xiaomanjun.sleepdownschedule.*
 import com.xiaomanjun.sleepdownschedule.feature.home.*
 import com.xiaomanjun.sleepdownschedule.feature.home.day.*
+import com.xiaomanjun.sleepdownschedule.feature.home.overlay.*
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.awaitLongPressOrCancellation
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
 
 import com.xiaomanjun.sleepdownschedule.core.performance.*
 import com.xiaomanjun.sleepdownschedule.core.ui.text.AutoFitSingleLineText
@@ -135,6 +145,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -359,6 +370,14 @@ internal fun SinglePillWeekScheduleScreen(
         weekCourseBuckets(state.courses, displayWeek)
     }
     val visibleCourses = weekBuckets.visibleCourses
+    val supplementaryRowCount = remember(state.courses, state.periods, displayWeek) {
+        (displayWeek - 1..displayWeek + 1).maxOf { week ->
+            weekCourseBuckets(state.courses, week).visibleCourses
+                .filter { courseNeedsSupplementaryWeekRow(it, state.periods) }
+                .groupingBy { it.weekday }.eachCount().values.maxOrNull() ?: 0
+        }
+    }
+    val supplementaryHeight = if (supplementaryRowCount > 0) 24.dp + 88.dp * supplementaryRowCount else 0.dp
     val weekdays = remember(weekBuckets, state.config.hideEmptyWeekends) {
         visibleWeekdaysForBuckets(weekBuckets, state.config.hideEmptyWeekends)
     }
@@ -537,11 +556,9 @@ internal fun SinglePillWeekScheduleScreen(
             retainEditControlOverflow = false
         }
     }
-    // Keep equal drawing/scrolling room on both sides while edit chrome is visible. The
-    // previous top-only gutter protected the first-row delete pill but left the last-row card
-    // and resize handle inside the pager's clip boundary, so the final grid cell could neither
-    // be reached reliably nor be shown completely during the edit-mode entrance frame.
-    val editControlOverflow = if (retainEditControlOverflow) 12.dp else 0.dp
+    // Include the glass shadow and entrance overshoot, with extra room below the last row.
+    val editControlOverflow = if (retainEditControlOverflow) 24.dp else 0.dp
+    val editControlBottomOverflow = if (retainEditControlOverflow) 40.dp else 0.dp
     LaunchedEffect(state.config.id, displayWeek, weekEditMode) {
         if (!weekEditMode) weekEditOverlay.clear()
     }
@@ -652,7 +669,7 @@ internal fun SinglePillWeekScheduleScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(cardHeight * state.periods.size + editControlOverflow)
+                        .height(cardHeight * state.periods.size + supplementaryHeight + editControlBottomOverflow)
                         .then(if (retainEditControlOverflow) Modifier else Modifier.clipToBounds())
                 ) {
                     Column(
@@ -767,7 +784,10 @@ internal fun SinglePillWeekScheduleScreen(
                             modifier = Modifier
                                 .offset(y = -editControlOverflow)
                                 .fillMaxWidth()
-                                .height(cardHeight * state.periods.size + editControlOverflow * 2f),
+                                // The parent reserves the bottom gutter. Allow the pager's extra
+                                // top gutter to extend above it without compressing the last row.
+                                .wrapContentHeight(align = Alignment.Top, unbounded = true)
+                                .height(cardHeight * state.periods.size + supplementaryHeight + editControlOverflow + editControlBottomOverflow),
                             userScrollEnabled = !weekEditMode,
                             // Keep the pager topology stable while a home overlay opens/closes.
                             // Disposing the adjacent week at the exact frame Personalization
@@ -789,10 +809,11 @@ internal fun SinglePillWeekScheduleScreen(
                                 modifier = Modifier.padding(
                                     start = rowHeaderWidth,
                                     top = editControlOverflow,
-                                    bottom = editControlOverflow,
+                                    bottom = editControlBottomOverflow,
                                     end = weekGridEndPadding
                                 ),
                                 courses = pageCourses,
+                                showSupplementaryRows = supplementaryRowCount > 0,
                                 weekdays = pageWeekdays,
                                 periods = state.periods,
                                 cardHeight = cardHeight,
@@ -850,7 +871,7 @@ internal fun SinglePillWeekScheduleScreen(
                     }
                 }
             }
-            Spacer(Modifier.height(WeekDockScrollPadding))
+            Spacer(Modifier.height(WeekDockScrollPadding + adaptiveMetrics.safeBottom))
         }
     }
         WeekEditOverlayHost(
@@ -1069,6 +1090,9 @@ private fun WeekEditOverlayHost(
             if (req.mode == WeekEditOverlayMode.Resize) {
                 WeekResizeCornerHandle(
                     config = config,
+                    backdrop = backdrop,
+                    cardSize = androidx.compose.ui.unit.DpSize(widthDp, heightDp),
+                    cardCorner = cardCorner,
                     selected = true,
                     modifier = Modifier
                         .align(Alignment.BottomEnd)
@@ -1082,7 +1106,7 @@ private fun WeekEditOverlayHost(
 }
 
 @Composable
-private fun WeekCourseOverlayCardContent(course: CourseEntity, config: ScheduleConfigEntity) {
+internal fun WeekCourseOverlayCardContent(course: CourseEntity, config: ScheduleConfigEntity) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val density = LocalDensity.current
         val heightDp = maxHeight.value
@@ -1247,6 +1271,9 @@ private fun WeekCourseOverlayCardContent(course: CourseEntity, config: ScheduleC
 @Composable
 private fun WeekResizeCornerHandle(
     config: ScheduleConfigEntity,
+    backdrop: Backdrop?,
+    cardSize: androidx.compose.ui.unit.DpSize,
+    cardCorner: Dp,
     selected: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -1256,38 +1283,29 @@ private fun WeekResizeCornerHandle(
     } else {
         ComposeColor.White.copy(alpha = if (selected) 0.88f else 0.72f)
     }
+    val badgeSize = (cardCorner * 1.35f + 8.dp).coerceIn(16.dp, 34.dp)
+        .coerceAtMost(minOf(cardSize.width, cardSize.height) / 2f + 4.dp)
+    val handleShape = remember(cardSize, cardCorner, badgeSize) {
+        WeekResizeCornerShape(cardSize, cardCorner, badgeSize)
+    }
     Box(
-        modifier = modifier.graphicsLayer {
-            val scale = if (selected) 1.14f else 1f
-            scaleX = scale
-            scaleY = scale
-        },
+        modifier = modifier,
         contentAlignment = Alignment.BottomEnd
     ) {
-        Canvas(modifier = Modifier.size(18.dp)) {
-            val strokeWidth = 7.5.dp.toPx()
-            val halfStroke = strokeWidth / 2f
-            val right = size.width - halfStroke
-            val bottom = size.height - halfStroke
-            val radius = 9.dp.toPx()
-            val arm = 3.5.dp.toPx()
-            val path = androidx.compose.ui.graphics.Path().apply {
-                moveTo(right, (bottom - radius - arm).coerceAtLeast(halfStroke))
-                cubicTo(
-                    right,
-                    bottom - radius * 0.35f,
-                    right - radius * 0.35f,
-                    bottom,
-                    right - radius,
-                    bottom
-                )
-                lineTo((right - radius - arm).coerceAtLeast(halfStroke), bottom)
-            }
-            drawPath(
-                path = path,
-                color = handleColor,
-                style = Stroke(width = strokeWidth, cap = StrokeCap.Round)
-            )
+        GlassSurface(
+            backdrop = backdrop,
+            config = config,
+            modifier = Modifier.size(badgeSize),
+            shape = handleShape,
+            tokens = GlassTokens.pill(intensity = 0.82f).copy(
+                surfaceAlpha = 0.36f,
+                shadowAlpha = 0.18f,
+                innerShadowAlpha = 0.14f
+            ),
+            selected = true,
+            onClick = null
+        ) {
+            Box(Modifier.fillMaxSize().background(handleColor.copy(alpha = if (selected) 0.28f else 0.16f), handleShape))
         }
     }
 }
@@ -1679,6 +1697,7 @@ fun WeekDayColumn(
     backdrop: Backdrop?,
     floatingBackdrop: Backdrop? = backdrop,
     config: ScheduleConfigEntity,
+    shortcutPivotX: Float,
     weekMotionDirection: Int = 0,
     weekMotionOutgoing: Boolean = false,
     dayIndex: Int = 1,
@@ -1738,8 +1757,11 @@ fun WeekDayColumn(
             .fillMaxWidth()
             .height(cardHeight * periods.size.toFloat())
     ) {
-        Column(Modifier.fillMaxSize()) {
-            periods.forEach { EmptyWeekCell(cardHeight, emptyBackground) }
+        val measuredCardLayoutWidth = (maxWidth - 4.dp).coerceAtLeast(1.dp)
+        if (emptyBackground.alpha > 0f) {
+            Column(Modifier.fillMaxSize()) {
+                periods.forEach { EmptyWeekCell(cardHeight, emptyBackground) }
+            }
         }
         renderedSegments.forEach { rendered ->
             val groupIndex = rendered.groupIndex
@@ -1788,7 +1810,9 @@ fun WeekDayColumn(
                     weekMotionOutgoing = weekMotionOutgoing,
                     dayIndex = dayIndex,
                     periodIndex = periodIndexes[segment.startPosition],
+                    shortcutPivotX = shortcutPivotX,
                     gridColumnWidth = gridColumnWidth,
+                    cardLayoutWidth = measuredCardLayoutWidth,
                     periodRowHeight = periodRowHeight,
                     layerOffset = layerOffset,
                     layerTravel = layerTravel,
@@ -1859,6 +1883,7 @@ fun WeekDayColumn(
 fun WeekCourseColumnsLayer(
     modifier: Modifier = Modifier,
     courses: List<CourseEntity>,
+    showSupplementaryRows: Boolean = false,
     weekdays: List<Int>,
     periods: List<PeriodEntity>,
     cardHeight: Dp,
@@ -1891,7 +1916,13 @@ fun WeekCourseColumnsLayer(
     onCourseClick: (CourseEntity, Rect?) -> Unit
 ) {
     val density = LocalDensity.current
-    val coursesByWeekday = remember(courses) { courses.groupBy { it.weekday } }
+    val supplementaryCoursesByDay = remember(courses, periods) {
+        courses.filter { courseNeedsSupplementaryWeekRow(it, periods) }
+            .sortedBy { it.customStartTime }.groupBy { it.weekday }
+    }
+    val coursesByWeekday = remember(courses, periods) {
+        courses.filterNot { courseNeedsSupplementaryWeekRow(it, periods) }.groupBy { it.weekday }
+    }
     val periodIndexes = remember(periods) { periods.map { it.periodIndex } }
     val renderedSegmentsByDay = remember(
         coursesByWeekday,
@@ -1947,8 +1978,10 @@ fun WeekCourseColumnsLayer(
     ) {
         val dayColumnWidth = maxWidth / weekdays.size.coerceAtLeast(1)
         val travel = with(density) { (maxWidth + 96.dp).toPx() }
+        val layoutDirection = androidx.compose.ui.platform.LocalLayoutDirection.current
         Row(modifier = Modifier.fillMaxWidth()) {
             weekdays.forEachIndexed { columnIndex, day ->
+                val shortcutPivotX = courseShortcutPivot(columnIndex, weekdays.size, layoutDirection)
                 Column(
                     modifier = Modifier
                         .weight(1f)
@@ -1966,6 +1999,7 @@ fun WeekCourseColumnsLayer(
                         weekMotionDirection = weekMotionDirection,
                         weekMotionOutgoing = outgoing,
                         dayIndex = day,
+                        shortcutPivotX = shortcutPivotX,
                         gridColumnWidth = dayColumnWidth,
                         periodRowHeight = cardHeight,
                         layerOffset = layerOffset,
@@ -1998,6 +2032,37 @@ fun WeekCourseColumnsLayer(
                         onFinishResizeOverlay = onFinishResizeOverlay,
                         onCancelWeekEditOverlay = onCancelWeekEditOverlay
                     )
+                    if (showSupplementaryRows) {
+                        Text(
+                            text = if (columnIndex == 0) "其他时间" else "",
+                            modifier = Modifier.height(24.dp).padding(top = 5.dp),
+                            color = glassForegroundColor(config),
+                            fontSize = 9.sp,
+                            maxLines = 1
+                        )
+                        supplementaryCoursesByDay[day].orEmpty().forEachIndexed { index, course ->
+                            Column(
+                                modifier = Modifier.fillMaxWidth().height(88.dp).padding(horizontal = 2.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(course.customStartTime.orEmpty(), fontSize = 8.sp, lineHeight = 10.sp,
+                                    color = glassForegroundColor(config), modifier = Modifier.height(12.dp))
+                                WeekCourseBlock(
+                                    course = course, periods = periods, height = 64.dp,
+                                    cardColor = cardColor, backdrop = backdrop, floatingBackdrop = floatingBackdrop,
+                                    config = config, dayIndex = day, gridColumnWidth = dayColumnWidth,
+                                    shortcutPivotX = shortcutPivotX,
+                                    stackIndex = index, editMode = editMode, editWeek = editWeek,
+                                    allWeekCourses = allWeekCourses, editScrollState = editScrollState,
+                                    onEnterEditMode = onEnterEditMode,
+                                    onDeleteSingleWeekCourse = onDeleteSingleWeekCourse,
+                                    onCourseClick = onCourseClick
+                                )
+                                Text(course.customEndTime.orEmpty(), fontSize = 8.sp, lineHeight = 10.sp,
+                                    color = glassForegroundColor(config), modifier = Modifier.height(12.dp))
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2832,11 +2897,13 @@ fun WeekCourseBlock(
     backdrop: Backdrop?,
     floatingBackdrop: Backdrop? = backdrop,
     config: ScheduleConfigEntity,
+    shortcutPivotX: Float,
     weekMotionDirection: Int = 0,
     weekMotionOutgoing: Boolean = false,
     dayIndex: Int = 1,
     periodIndex: Int = 1,
     gridColumnWidth: Dp = 0.dp,
+    cardLayoutWidth: Dp = (gridColumnWidth - 4.dp).coerceAtLeast(1.dp),
     periodRowHeight: Dp = height,
     layerOffset: Animatable<Float, AnimationVector1D>? = null,
     layerTravel: Float = 1f,
@@ -3025,47 +3092,80 @@ fun WeekCourseBlock(
             conflictCardFlight.snapTo(0f)
         }
     }
-    val bodyGestureModifier = Modifier.pointerInput(editMode, customTimeLocked, course.id, editWeek, currentSpan) {
-        if (editMode && !customTimeLocked) {
+    val shortcuts = LocalCourseShortcuts.current
+    val currentEditMode by rememberUpdatedState(editMode)
+    val openShortcut by rememberUpdatedState<() -> Unit> {
+        ownBoundsRef[0]?.let { bounds ->
+            shortcuts?.open(CourseShortcutRequest(course, editWeek, bounds,
+                with(density) { cardCorner.toPx() }, shortcutPivotX, onEnterEditMode))
+        }
+    }
+    val startBodyDrag by rememberUpdatedState<(Offset) -> Boolean> { position ->
+        val request = buildWeekEditOverlayRequest(WeekEditOverlayMode.Move, position)
+        if (request != null && !customTimeLocked) {
+            shortcuts?.takeOverDrag()
+            onEnterEditMode()
+            bodyDragging = true
+            onStartWeekEditOverlay(request)
+            true
+        } else false
+    }
+    val dragBody by rememberUpdatedState(onDragWeekEditOverlay)
+    val finishBodyDrag by rememberUpdatedState(onFinishMoveOverlay)
+    val cancelBodyDrag by rememberUpdatedState(onCancelWeekEditOverlay)
+    val clickBody by rememberUpdatedState<() -> Unit> { onCourseClick(course, ownBoundsRef[0]) }
+    // Editing is read through updated state, never a pointerInput key: switching into edit
+    // mode must not cancel the finger that is about to move the course.
+    val bodyGestureModifier = Modifier.pointerInput(customTimeLocked, course.id, editWeek, currentSpan) {
+        awaitEachGesture {
+            val down = awaitFirstDown()
+            down.consume()
+            val longPress = awaitLongPressOrCancellation(down.id)
+            if (longPress == null) {
+                val up = currentEvent.changes.firstOrNull { it.id == down.id }
+                if (up != null && up.changedToUpIgnoreConsumed() && !up.isConsumed) {
+                    up.consume()
+                    if (!currentEditMode || customTimeLocked) clickBody()
+                }
+                return@awaitEachGesture
+            }
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            if (!currentEditMode) openShortcut()
             val velocityTracker = VelocityTracker()
-            detectDragGesturesAfterLongPress(
-                onDragStart = { startPosition ->
-                    velocityTracker.resetTracking()
-                    buildWeekEditOverlayRequest(WeekEditOverlayMode.Move, startPosition)?.let { request ->
-                        bodyDragging = true
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onStartWeekEditOverlay(request)
-                    }
-                },
-                onDrag = { change, dragAmount ->
-                    if (bodyDragging) {
+            velocityTracker.addPosition(longPress.uptimeMillis, longPress.position)
+            var accumulated = Offset.Zero
+            var dragging = currentEditMode && !customTimeLocked && startBodyDrag(longPress.position)
+            var released = false
+            try {
+                while (true) {
+                    val event = awaitPointerEvent()
+                    val change = event.changes.firstOrNull { it.id == longPress.id } ?: break
+                    if (event.changes.any { it.id != longPress.id && it.pressed } || change.isConsumed) break
+                    if (!change.pressed) {
+                        released = change.changedToUpIgnoreConsumed()
                         change.consume()
-                        velocityTracker.addPosition(change.uptimeMillis, change.position)
-                        onDragWeekEditOverlay(dragAmount)
+                        break
                     }
-                },
-                onDragEnd = {
-                    if (bodyDragging) {
-                        onFinishMoveOverlay(velocityTracker.calculateVelocity())
-                        bodyDragging = false
+                    val delta = change.positionChange()
+                    accumulated += delta
+                    velocityTracker.addPosition(change.uptimeMillis, change.position)
+                    change.consume()
+                    if (!dragging && !customTimeLocked && accumulated.getDistance() > viewConfiguration.touchSlop) {
+                        dragging = startBodyDrag(longPress.position)
+                        if (dragging) dragBody(accumulated)
+                    } else if (dragging) {
+                        dragBody(delta)
+                    }
+                }
+            } finally {
+                if (dragging) {
+                    bodyDragging = false
+                    if (released) {
+                        finishBodyDrag(velocityTracker.calculateVelocity())
                         haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                    }
-                },
-                onDragCancel = {
-                    if (bodyDragging) {
-                        bodyDragging = false
-                        onCancelWeekEditOverlay()
-                    }
-                }
-            )
-        } else {
-            detectTapGestures(
-                onTap = { onCourseClick(course, ownBoundsRef[0]) },
-                onLongPress = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    if (!editMode) onEnterEditMode()
-                }
-            )
+                    } else cancelBodyDrag()
+                } else if (!released) shortcuts?.close()
+            }
         }
     }
     val editingId = LocalEditingCourseId.current
@@ -3150,6 +3250,15 @@ fun WeekCourseBlock(
                 .then(startupModifier)
                 .then(tailModifier)
                 .then(bodyGestureModifier)
+                .semantics {
+                    onClick("查看课程") { clickBody(); true }
+                    onLongClick("课程快捷操作") { openShortcut(); true }
+                }
+                .graphicsLayer {
+                    val shortcut = shortcuts?.request
+                    alpha = if (shortcut?.course?.id == course.id && shortcut.week == editWeek &&
+                        shortcut.bounds == ownBoundsRef[0]) 0f else 1f
+                }
                 .zIndex(if (liftedVisualActive) 3f else 0f)
         ) {
             conflictUnderlyingCourse
@@ -3290,10 +3399,12 @@ fun WeekCourseBlock(
                 sampledShape = sampledCardShape,
                 onClick = null
             ) {}
-            BoxWithConstraints(Modifier.fillMaxWidth().height(displayedHeight).clipToBounds()) {
+            // The day column already knows the measured width. Subcomposing every card again
+            // made a single prefetched page spend 17–24ms in measureAndLayout on the 120Hz phone.
+            Box(Modifier.fillMaxWidth().height(displayedHeight).clipToBounds()) {
             val density = LocalDensity.current
             val heightDp = displayedHeight.value
-            val widthDp = maxWidth.value
+            val widthDp = cardLayoutWidth.value
             val compact = heightDp < 78f
             val tiny = heightDp < 52f
             val verticalPadding = when {
@@ -3314,8 +3425,8 @@ fun WeekCourseBlock(
             val locationLineHeight = scaledCourseWeekText(if (tiny) 8.0.sp else if (compact) 8.6.sp else 9.3.sp)
             val teacherFont = scaledCourseWeekText(8.4.sp)
             val teacherLineHeight = scaledCourseWeekText(7.9.sp)
-            val contentWidthPx = with(density) { (maxWidth - horizontalPadding * 2f).coerceAtLeast(24.dp).toPx() }
-            val availableTextPx = with(density) { (maxHeight - verticalPadding * 2f).coerceAtLeast(0.dp).toPx() }
+            val contentWidthPx = with(density) { (cardLayoutWidth - horizontalPadding * 2f).coerceAtLeast(24.dp).toPx() }
+            val availableTextPx = with(density) { (displayedHeight - verticalPadding * 2f).coerceAtLeast(0.dp).toPx() }
 
             fun estimatedLines(text: String, fontSize: TextUnit): Int {
                 if (text.isBlank()) return 0
@@ -3615,6 +3726,9 @@ fun WeekCourseBlock(
             fun renderResizeHandle(modifier: Modifier) {
                 WeekResizeCornerHandle(
                     config = config,
+                    backdrop = activeCardBackdrop,
+                    cardSize = androidx.compose.ui.unit.DpSize(cardLayoutWidth, displayedHeight),
+                    cardCorner = cardCorner,
                     selected = handleDragging,
                     modifier = modifier.then(resizeHandleModifier)
                 )

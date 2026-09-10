@@ -105,6 +105,8 @@ object AppIconManager {
     private const val StyleKey = "style"
     private const val FollowsSystemDarkModeKey = "follows_system_dark_mode"
     private const val DarkThemeKey = "dark_theme"
+    private var lastAppliedIconResId: Int? = null
+    internal var onIconChanged: (() -> Unit)? = null
 
     fun currentDarkTheme(context: Context): Boolean = if (
         preferences(context).getBoolean(FollowsSystemDarkModeKey, true)
@@ -201,6 +203,11 @@ object AppIconManager {
             }
         setAliasEnabled(packageManager, context, desired, enabled = true)
         com.xiaomanjun.sleepdownschedule.feature.reminder.NotificationScheduler.refreshLiveUpdateIcon(context)
+        val iconResId = currentIconResId(context)
+        if (lastAppliedIconResId != iconResId) {
+            lastAppliedIconResId = iconResId
+            onIconChanged?.invoke()
+        }
     }
 
     private fun setAliasEnabled(

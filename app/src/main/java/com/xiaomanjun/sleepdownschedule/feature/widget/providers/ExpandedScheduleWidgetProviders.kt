@@ -10,6 +10,7 @@ import com.xiaomanjun.sleepdownschedule.core.wallpaper.*
 import com.xiaomanjun.sleepdownschedule.domain.course.*
 
 import com.xiaomanjun.sleepdownschedule.feature.widget.*
+import com.xiaomanjun.sleepdownschedule.core.identity.currentIconResId
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
@@ -505,6 +506,7 @@ internal object TodayTomorrowWidgetRenderer {
             ?: effectiveCurrentWeek(state.config, today)
 
         return RemoteViews(context.packageName, R.layout.widget_today_tomorrow_adaptive_v4).apply {
+            setImageViewResource(R.id.widget_app_icon, currentIconResId(context))
             setInt(
                 R.id.widget_tt_root,
                 "setBackgroundResource",
@@ -1168,6 +1170,7 @@ internal object WeekScheduleWidgetRenderer {
             R.layout.widget_week_schedule_adaptive_v7
         }
         return RemoteViews(context.packageName, layoutId).apply {
+            setImageViewResource(R.id.widget_app_icon, currentIconResId(context))
             setInt(
                 R.id.widget_week_root,
                 "setBackgroundResource",

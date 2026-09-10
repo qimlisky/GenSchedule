@@ -234,6 +234,27 @@ fun CourseEntity.hasCustomTime(): Boolean = customTimeRangeOrNull() != null
 
 internal fun courseAllowsWeekPeriodDrag(course: CourseEntity): Boolean = !course.hasCustomTime()
 
+/** Split only missing scheduled periods; ordinary breaks within consecutive periods stay together. */
+internal fun courseReminderSessions(course: CourseEntity, periods: List<PeriodEntity>): List<CourseEntity> {
+    if (course.hasCustomTime()) return listOf(course)
+    val positions = periods.sortedBy { it.periodIndex }.map { it.periodIndex }
+    val selected = course.periods.toSet()
+    val groups = mutableListOf<MutableList<Int>>()
+    var previousPosition = -2
+    positions.forEachIndexed { position, period ->
+        if (period in selected) {
+            if (position != previousPosition + 1) groups += mutableListOf<Int>()
+            groups.last() += period
+            previousPosition = position
+        }
+    }
+    return groups.map { course.copy(periods = it.toList()) }
+}
+
+/** Exact-time events outside teaching rows (including breaks) need their own visible card. */
+internal fun courseNeedsSupplementaryWeekRow(course: CourseEntity, periods: List<PeriodEntity>): Boolean =
+    course.hasCustomTime() && (exactTimeWeekPlacement(course, periods)?.heightRows ?: 0f) <= 0f
+
 /**
  * Keeps exact-time courses compatible with the existing period-backed grid and notifications.
  * Every period touched by the exact interval becomes an anchor; if the interval sits completely

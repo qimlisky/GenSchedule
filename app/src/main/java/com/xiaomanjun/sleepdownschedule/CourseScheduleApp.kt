@@ -52,6 +52,7 @@ class CourseScheduleApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        AppIconManager.onIconChanged = { TodayCoursesWidgetProvider.refreshAll(this) }
         AppIconManager.applyStoredMode(this)
         SleepDownRemoteConfig.initialize(this, applicationScope)
         ActivityTransitionCoordinator.install(this)

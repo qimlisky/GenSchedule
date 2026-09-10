@@ -1,5 +1,7 @@
 package com.xiaomanjun.sleepdownschedule.app.ui
 
+import androidx.compose.animation.core.LinearEasing
+
 import com.xiaomanjun.sleepdownschedule.*
 import com.xiaomanjun.sleepdownschedule.app.startup.*
 import com.xiaomanjun.sleepdownschedule.app.state.*
@@ -93,6 +95,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
@@ -582,7 +586,8 @@ sealed interface HomeDialog {
     data object EduImport : HomeDialog
     data class ConfirmImport(val draft: ImportDraft, val returnDialog: HomeDialog? = ImportSchedule) : HomeDialog
     data class EditWallpaper(val uri: Uri, val entrySnapshot: Bitmap?) : HomeDialog
-    data class EditCourse(val course: CourseEntity?, val targetWeek: Int? = null) : HomeDialog
+    data class EditCourse(val course: CourseEntity?, val targetWeek: Int? = null,
+        val copyDraft: CourseEntity? = null) : HomeDialog
     data class ApplyCourseEdit(val original: CourseEntity, val edited: CourseEntity, val targetWeek: Int) : HomeDialog
     data class ConfirmCourseConflicts(
         val original: CourseEntity,
@@ -831,11 +836,15 @@ fun CourseScheduleAppUi(
             homeDialogVisible = true
         } else if (renderedHomeDialog != null) {
             homeDialogVisible = false
-            delay(320)
-            renderedHomeDialog = null
+            // The centered copy editor owns its exit completion, including interrupted motion.
+            if ((renderedHomeDialog as? HomeDialog.EditCourse)?.copyDraft == null) {
+                delay(320)
+                renderedHomeDialog = null
+            }
         }
     }
     val homeAnchoredMorphState = rememberHomeAnchoredMorphState()
+    val courseShortcuts = remember(appScope) { CourseShortcutController(appScope) }
     val homeMenuDestinationMotionState = rememberHomeMenuDestinationMotionState()
     var homeMenuDestinationRequest by remember { mutableStateOf<HomeMenuDestinationRequest?>(null) }
     var homeMenuSourceHidden by remember { mutableStateOf(false) }
@@ -1670,6 +1679,11 @@ fun CourseScheduleAppUi(
             else -> legacyDepth
         }
     }
+    LaunchedEffect(screen, homeMode, visualState.config.id, homeDisplayWeek,
+        homeAdaptiveMetrics.screenWidth, homeAdaptiveMetrics.screenHeight,
+        homeAnchoredOverlayRequest, pickerState.overlayVisible) {
+        courseShortcuts.reset()
+    }
     LaunchedEffect(
         substantialOverlaySessionActive,
         screen,
@@ -2280,6 +2294,7 @@ fun CourseScheduleAppUi(
     val useSharedCourseBackdrop = screen is Screen.Home && visualState.config.courseCardGlassEnabled &&
         wallpaperImages.source != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
     CompositionLocalProvider(
+        LocalCourseShortcuts provides courseShortcuts,
         com.xiaomanjun.sleepdownschedule.glass.LocalSharedCourseBackdrop provides
             sharedCourseBackdrop.takeIf { useSharedCourseBackdrop },
         LocalSharedTransitionScope provides activeSharedTransitionScope,
@@ -2304,9 +2319,24 @@ fun CourseScheduleAppUi(
         modifier = Modifier.fillMaxSize(),
         underlayModifier = Modifier
             .fillMaxSize()
-            .centeredDialogSceneProducer(centeredDialogSceneBackdrop),
+            .then(if (courseShortcuts.request != null) {
+                Modifier.glassBackdropProducer(centeredDialogSceneBackdrop)
+            } else {
+                Modifier.centeredDialogSceneProducer(centeredDialogSceneBackdrop)
+            }),
         popupHost = {
             Box(Modifier.fillMaxSize()) {
+                CourseShortcutOverlay(
+                    controller = courseShortcuts,
+                    config = visualState.config,
+                    backdrop = centeredDialogSceneBackdrop,
+                    cardBackdrop = backgroundBackdrop,
+                    onCopy = { draft -> homeDialog = HomeDialog.EditCourse(null, copyDraft = draft) },
+                    onRemove = { course, week ->
+                        pendingCourseGroupDelete = emptyList()
+                        homeDialog = HomeDialog.ApplyCourseDelete(course, week)
+                    }
+                )
                 // Overlay content is subcomposed by the host, not at its call site. Preserve the
                 // same Miuix/Glass CompositionLocals that wrapped the 1.1.5 host; otherwise sheet
                 // rows fall back to the taller non-Miuix implementation and their dividers become
@@ -2465,9 +2495,9 @@ fun CourseScheduleAppUi(
                 .background(MaterialTheme.colorScheme.background)
         ) {
         HomeBackgroundBlurLayer(
-            blurProgress = homeOverlayBackgroundBlurProgress,
+            blurProgress = { maxOf(homeOverlayBackgroundBlurProgress(), courseShortcuts.progress.value) },
             useFrozenHomeScene = useFrozenHomeMorphBlur,
-            closing = { homeBackgroundBlurClosing },
+            closing = { homeBackgroundBlurClosing || courseShortcuts.closing },
             sceneKey = homeCaptureFrameKey,
             modifier = Modifier.fillMaxSize()
         ) {
@@ -2886,7 +2916,10 @@ fun CourseScheduleAppUi(
                                             pendingConflictWeeks = emptyList()
                                         }
                                     },
-                                     onDeleteCourseSingleWeek = viewModel::deleteCourseSingleWeek,
+                                     onDeleteCourseSingleWeek = { course, week ->
+                                         pendingCourseGroupDelete = emptyList()
+                                         homeDialog = HomeDialog.ApplyCourseDelete(course, week)
+                                     },
                                       weekEditInteractionEnabled = pickerState.phase is CustomizeUiState.Home,
                                       courseGlassOcclusionPhase = effectiveCourseGlassOcclusionPhase,
                                       courseGlassRestoredGroupKeys = courseGlassRestoredGroupKeys,
@@ -3933,7 +3966,22 @@ fun CourseScheduleAppUi(
     // Dialog-based dialogs for all other types (including EditCourse without a source card)
     renderedHomeDialog?.let { dialog ->
         if (dialog !is HomeDialog.EditWallpaper && (dialog !is HomeDialog.EditCourse || dialog.course == null)) {
-        if (dialog is HomeDialog.ApplyCourseEdit) {
+        if (dialog is HomeDialog.EditCourse && dialog.copyDraft != null) {
+            CopiedCourseEditorOverlay(
+                show = homeDialogVisible,
+                draft = dialog.copyDraft,
+                state = state,
+                backdrop = homeDialogBackdrop,
+                onDismissRequest = { dismissHomeDialog() },
+                onDismissFinished = {
+                    if (homeDialog == null && renderedHomeDialog == dialog) renderedHomeDialog = null
+                },
+                onSave = { courses ->
+                    viewModel.addCourses(courses.map { it.copy(id = 0, scheduleId = dialog.copyDraft.scheduleId) })
+                    dismissHomeDialog()
+                }
+            )
+        } else if (dialog is HomeDialog.ApplyCourseEdit) {
             ApplyCourseEditDialog(
                 original = dialog.original,
                 edited = dialog.edited,
@@ -4162,7 +4210,12 @@ fun CourseScheduleAppUi(
                             NormalizedCourseEditorScreen(
                                 state = state,
                                 initialCourse = dialog.course,
+                                copyDraft = dialog.copyDraft,
                                 onCancel = { dismissHomeDialog() },
+                                onSaveCourses = if (dialog.copyDraft != null) { courses ->
+                                    viewModel.addCourses(courses.map { it.copy(id = 0, scheduleId = dialog.copyDraft.scheduleId) })
+                                    dismissHomeDialog()
+                                } else null,
                                 onSave = {
                                     if (dialog.course == null) {
                                         viewModel.addCourse(it)
@@ -5233,8 +5286,10 @@ internal fun HomeIconButtonVisual(
 }
 
 data class AddMenuAction(
-    val iconRes: Int,
+    val iconRes: Int? = null,
     val label: String,
+    val imageVector: ImageVector? = null,
+    val iconTint: ComposeColor? = null,
     val onClick: () -> Unit
 )
 
@@ -5251,14 +5306,16 @@ fun AddMenuLiquidItem(
     config: ScheduleConfigEntity,
     action: AddMenuAction,
     itemHeight: Dp,
-    highlighted: Boolean
+    highlighted: Boolean,
+    modifier: Modifier = Modifier,
+    compactCapsule: Boolean = false
 ) {
     val baseText = glassForegroundColor(config)
     val selectedColor = ComposeColor(0xFF8E8E93).copy(
         alpha = if (glassUsesLightStyle(config)) 0.20f else 0.28f
     )
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(itemHeight),
         contentAlignment = Alignment.Center
@@ -5267,21 +5324,22 @@ fun AddMenuLiquidItem(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(itemHeight - 2.dp)
-                .clip(RoundedRectangle(HomeAddMenuSelectionCornerDp.dp))
+                .clip(if (compactCapsule) Capsule() else RoundedRectangle(HomeAddMenuSelectionCornerDp.dp))
                 .background(if (highlighted) selectedColor else ComposeColor.Transparent)
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = if (compactCapsule) 14.dp else 16.dp),
             contentAlignment = Alignment.CenterStart
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(if (compactCapsule) 12.dp else 10.dp)
             ) {
                 Icon(
-                    painterResource(action.iconRes),
+                    action.imageVector?.let { rememberVectorPainter(it) }
+                        ?: painterResource(requireNotNull(action.iconRes)),
                     contentDescription = null,
-                    modifier = Modifier.size(21.dp),
-                    tint = baseText
+                    modifier = Modifier.size(if (compactCapsule) 20.dp else 21.dp),
+                    tint = action.iconTint ?: baseText
                 )
                 Text(
                     action.label,
@@ -5645,14 +5703,15 @@ private fun PersonalizeValueSlider(
     onSliderPreviewActiveChange: (String, Boolean) -> Unit,
     snapValue: Float? = null,
     benchmarkDescription: String? = null,
-    onTouchActiveChange: (Boolean) -> Unit = {}
+    onTouchActiveChange: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val displayValue = remember(valueRange) { mutableFloatStateOf(value.coerceIn(valueRange)) }
     LaunchedEffect(value, valueRange) {
         displayValue.floatValue = value.coerceIn(valueRange)
     }
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .personalizePreviewVisibility(previewSliderKey, previewProgress, sliderKey),
         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -5688,10 +5747,12 @@ private fun WallpaperBlurControl(
     previewSliderKey: String?,
     previewProgress: Float,
     onSliderPreviewActiveChange: (String, Boolean) -> Unit,
-    onTouchActiveChange: (Boolean) -> Unit
+    onTouchActiveChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     PersonalizeValueSlider(
         sliderKey = PersonalizeWallpaperBlurSlider,
+        modifier = modifier,
         value = wallpaperBlurPercent(blurDp),
         valueRange = 0f..100f,
         backdrop = backdrop,
@@ -6283,6 +6344,21 @@ fun PersonalizePanel(
     previewProgress: Float,
     onSliderPreviewActiveChange: (String, Boolean) -> Unit
 ) {
+    val rowReveal = remember { Animatable(0f) }
+    val rowDensity = LocalDensity.current
+    val rowEasing = remember { CubicBezierEasing(0.22f, 0f, 0.30f, 1f) }
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        rowReveal.animateTo(1f, tween(580, easing = LinearEasing))
+    }
+    fun Modifier.rowEntrance(index: Int): Modifier = graphicsLayer {
+        val t = ((rowReveal.value * 580f - index * 15f) / 340f).coerceIn(0f, 1f)
+        val progress = rowEasing.transform(t)
+        alpha = progress
+        scaleX = 0.86f + 0.14f * progress
+        scaleY = scaleX
+        translationY = (1f - progress) * with(rowDensity) { 32.dp.toPx() }
+    }
     val inheritedCoursePalette = LocalCourseCardPalette.current
     var showCourseColorDialog by remember { mutableStateOf(false) }
     var courseColorDialogMode by remember { mutableStateOf(CourseCardColorMode.SOLID) }
@@ -6373,7 +6449,7 @@ fun PersonalizePanel(
         Column(modifier = modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PersonalizeSection {
                 Row(
-                    modifier = Modifier
+                    modifier = Modifier.rowEntrance(0)
                         .fillMaxWidth()
                         .personalizePreviewVisibility(previewSliderKey, previewProgress),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -6416,6 +6492,7 @@ fun PersonalizePanel(
                     }
                 }
                 WallpaperBlurControl(
+                    modifier = Modifier.rowEntrance(1),
                     blurDp = state.config.wallpaperBlur,
                     backdrop = backdrop,
                     onCommit = { percent ->
@@ -6439,6 +6516,7 @@ fun PersonalizePanel(
                 )
                 PersonalizeValueSlider(
                     sliderKey = PersonalizeWallpaperBrightnessSlider,
+                    modifier = Modifier.rowEntrance(2),
                     value = state.config.wallpaperBrightness.coerceIn(0.35f, 1f),
                     valueRange = 0.35f..1f,
                     backdrop = backdrop,
@@ -6468,13 +6546,13 @@ fun PersonalizePanel(
                 if (mode == HomeMode.Week) {
                     Text(
                         text = "周视图行高",
-                        modifier = Modifier
+                        modifier = Modifier.rowEntrance(3)
                             .fillMaxWidth()
                             .personalizePreviewVisibility(previewSliderKey, previewProgress),
                         style = MaterialTheme.typography.labelLarge
                     )
                     Column(
-                        modifier = Modifier.personalizePreviewVisibility(
+                        modifier = Modifier.rowEntrance(4).personalizePreviewVisibility(
                             previewSliderKey,
                             previewProgress,
                             PersonalizeWeekHeightSlider
@@ -6536,7 +6614,7 @@ fun PersonalizePanel(
                     }
                 }
                 Row(
-                    modifier = Modifier
+                    modifier = Modifier.rowEntrance(5)
                         .fillMaxWidth()
                         .personalizePreviewVisibility(previewSliderKey, previewProgress),
                     horizontalArrangement = Arrangement.Start,
@@ -6555,7 +6633,7 @@ fun PersonalizePanel(
                     customSelected = state.config.courseCardColorMode == CourseCardColorMode.SOLID &&
                         SolidCourseColorPresets.none { it == state.config.cardColorArgb },
                     backdrop = backdrop,
-                    modifier = Modifier.personalizePreviewVisibility(previewSliderKey, previewProgress),
+                    modifier = Modifier.rowEntrance(6).personalizePreviewVisibility(previewSliderKey, previewProgress),
                     onPresetSelected = { colors ->
                         onUpdateConfig(
                             PersonalizeCardColorChange,
@@ -6577,7 +6655,7 @@ fun PersonalizePanel(
                     customSelected = state.config.courseCardColorMode == CourseCardColorMode.GRADIENT &&
                         GradientCourseColorPresets.none { it == state.config.cardColorArgb },
                     backdrop = backdrop,
-                    modifier = Modifier.personalizePreviewVisibility(previewSliderKey, previewProgress),
+                    modifier = Modifier.rowEntrance(7).personalizePreviewVisibility(previewSliderKey, previewProgress),
                     onPresetSelected = { colors ->
                         onUpdateConfig(
                             PersonalizeCardColorChange,
@@ -6599,7 +6677,7 @@ fun PersonalizePanel(
                     customSelected = state.config.courseCardColorMode == CourseCardColorMode.COLORFUL &&
                         state.config.courseCardPalette.isNotBlank(),
                     backdrop = backdrop,
-                    modifier = Modifier.personalizePreviewVisibility(previewSliderKey, previewProgress),
+                    modifier = Modifier.rowEntrance(8).personalizePreviewVisibility(previewSliderKey, previewProgress),
                     onPresetSelected = {
                         onUpdateConfig(
                             PersonalizeCardColorChange,
@@ -6621,6 +6699,7 @@ fun PersonalizePanel(
                 }
                 PersonalizeValueSlider(
                     sliderKey = PersonalizeCardAlphaSlider,
+                    modifier = Modifier.rowEntrance(9),
                     value = state.config.cardAlpha.coerceIn(0f, 1f),
                     valueRange = 0f..1f,
                     backdrop = backdrop,
@@ -6652,6 +6731,7 @@ fun PersonalizePanel(
                     val maxCourseCardBlur = courseCardBlurMaximum(state.config.courseCardGlassEnabled)
                     PersonalizeValueSlider(
                         sliderKey = PersonalizeCardBlurSlider,
+                        modifier = Modifier.rowEntrance(10),
                         value = state.config.courseCardBlur.coerceIn(0f, maxCourseCardBlur) /
                             maxCourseCardBlur * 100f,
                         valueRange = 0f..100f,
@@ -6680,6 +6760,7 @@ fun PersonalizePanel(
                 }
                 PersonalizeValueSlider(
                     sliderKey = PersonalizeCardFontSlider,
+                    modifier = Modifier.rowEntrance(11),
                     value = state.config.courseCardFontScale,
                     valueRange = 0.80f..1.35f,
                     backdrop = backdrop,
@@ -6707,6 +6788,7 @@ fun PersonalizePanel(
                 if (mode == HomeMode.Week) {
                     PersonalizeValueSlider(
                         sliderKey = PersonalizeWeekCornerSlider,
+                        modifier = Modifier.rowEntrance(12),
                         value = state.config.weekCardCornerProgress.coerceIn(0f, 1f),
                         valueRange = 0f..1f,
                         backdrop = backdrop,
@@ -6735,6 +6817,7 @@ fun PersonalizePanel(
                 if (state.config.courseCardGlassEnabled && !glassLocked) {
                     PersonalizeValueSlider(
                         sliderKey = PersonalizeCardRefractionSlider,
+                        modifier = Modifier.rowEntrance(13),
                         value = state.config.courseCardRefractionStrength.coerceIn(0f, 1f),
                         valueRange = 0f..1f,
                         backdrop = backdrop,
@@ -6766,7 +6849,7 @@ fun PersonalizePanel(
                         .personalizePreviewVisibility(previewSliderKey, previewProgress)
                 )
                 Row(
-                    modifier = Modifier
+                    modifier = Modifier.rowEntrance(14)
                         .fillMaxWidth()
                         .heightIn(min = 48.dp)
                         .personalizePreviewVisibility(previewSliderKey, previewProgress),
@@ -6799,7 +6882,7 @@ fun PersonalizePanel(
                 }
                 if (state.config.courseCardGlassEnabled && !glassLocked) {
                     Row(
-                        modifier = Modifier
+                        modifier = Modifier.rowEntrance(15)
                             .fillMaxWidth()
                             .heightIn(min = 48.dp)
                             .personalizePreviewVisibility(previewSliderKey, previewProgress),
@@ -6820,7 +6903,7 @@ fun PersonalizePanel(
                     }
                 } else {
                     Row(
-                        modifier = Modifier
+                        modifier = Modifier.rowEntrance(15)
                             .fillMaxWidth()
                             .heightIn(min = 48.dp)
                             .personalizePreviewVisibility(previewSliderKey, previewProgress),
